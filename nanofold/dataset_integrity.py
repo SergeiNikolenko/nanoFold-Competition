@@ -326,6 +326,7 @@ def _stable_preprocess_meta_sha256(path: Path) -> str | None:
         "min_projection_valid_ca",
         "msa_name",
         "msa_names",
+        "msa_row_filter_sha256",
         "strict",
         "template_hhr_name",
     )

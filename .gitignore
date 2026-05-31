@@ -71,3 +71,16 @@ tmp/pdf_text/openfold.txt
 references.bib
 tests/test_neurips_paper_defaults.py
 tests/test_neurips_paper_defaults.py
+EXEC_PLAN.md
+PROGRESS.md
+rebuttals.md
+scripts/make_metric_sensitivity_table.py
+scripts/make_rebuttal_result_summary.py
+scripts/prepare_rebuttal_run_configs.py
+scripts/verify_rebuttal_run_artifacts.py
+tests/test_prepare_rebuttal_run_configs.py
+tests/test_rebuttal_result_summary.py
+tests/test_verify_rebuttal_run_artifacts.py
+tests/test_write_msa_row_filter_source_lock.py
+tests/test_rebuttal_cross_architecture_adapters.py
+third_party/minAlphaFold2

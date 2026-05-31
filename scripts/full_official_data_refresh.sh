@@ -53,6 +53,7 @@ Options:
   --private-manifest-lock <path>      Hidden manifest source lock path
                                       (default: <private-root>/leaderboard/private_hidden_manifest_source.lock.json)
   --msa-names <csv>                   Comma-separated MSA filenames to download/preprocess
+  --msa-row-filter <path>             Optional JSON of held-out-homolog MSA row hashes for public/hidden preprocessing
   --rewrite-lock                      Rewrite lock metadata after manifest regeneration
   --skip-manifest-regen               Skip manifest regeneration step
   --skip-setup                        Skip download+preprocess step
@@ -101,6 +102,7 @@ DOWNLOAD_RETRY_DELAY_SECONDS=2.0
 DOWNLOAD_WORKERS=32
 MMCIF_MODE="subset"
 MSA_NAMES=""
+MSA_ROW_FILTER=""
 USE_TEMPLATES=0
 REWRITE_LOCK=0
 SKIP_MANIFEST_REGEN=0
@@ -239,6 +241,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --msa-names)
       MSA_NAMES="$2"
+      shift 2
+      ;;
+    --msa-row-filter)
+      MSA_ROW_FILTER="$2"
       shift 2
       ;;
     --enable-templates)
@@ -467,6 +473,9 @@ if [[ "$SKIP_SETUP" -eq 0 ]]; then
   if [[ -n "$MSA_NAMES" ]]; then
     SETUP_CMD+=(--msa-names "$MSA_NAMES")
   fi
+  if [[ -n "$MSA_ROW_FILTER" ]]; then
+    SETUP_CMD+=(--msa-row-filter "$MSA_ROW_FILTER")
+  fi
   if [[ "$USE_TEMPLATES" -eq 0 ]]; then
     SETUP_CMD+=(--disable-templates)
   else
@@ -527,6 +536,9 @@ if [[ "$SKIP_HIDDEN" -eq 0 && "$SKIP_SETUP" -eq 0 ]]; then
   )
   if [[ -n "$MSA_NAMES" ]]; then
     HIDDEN_PREPROCESS_CMD+=(--msa-names "$MSA_NAMES")
+  fi
+  if [[ -n "$MSA_ROW_FILTER" ]]; then
+    HIDDEN_PREPROCESS_CMD+=(--msa-row-filter "$MSA_ROW_FILTER")
   fi
   if [[ "$USE_TEMPLATES" -eq 1 ]]; then
     HIDDEN_PREPROCESS_CMD+=(--template-hhr-name "pdb70_hits.hhr")

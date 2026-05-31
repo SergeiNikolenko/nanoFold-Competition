@@ -61,7 +61,7 @@ def test_minalphafold2_reference_loads_upstream_tiny_toml() -> None:
     assert model.config == expected
 
 
-def test_minalphafold2_full_profile_fits_limited_param_cap() -> None:
+def test_minalphafold2_full_profile_reports_trainable_parameters_without_track_cap() -> None:
     cfg = yaml.safe_load(Path("submissions/minalphafold2_full/config.yaml").read_text())
     track = load_track_spec("limited")
 
@@ -69,8 +69,7 @@ def test_minalphafold2_full_profile_fits_limited_param_cap() -> None:
 
     assert cfg["model"]["profile_path"] == "third_party/minAlphaFold2/configs/alphafold2.toml"
     assert n_params > 50_000_000
-    assert track.max_params == 100_000_000
-    assert n_params <= int(track.max_params)
+    assert track.max_params is None
 
 
 def test_minalphafold2_budget_schedule_scales_af2_protocol_to_track_budget() -> None:
@@ -78,23 +77,23 @@ def test_minalphafold2_budget_schedule_scales_af2_protocol_to_track_budget() -> 
 
     schedule = submission._af2_budget_schedule(cfg)
 
-    assert schedule.max_steps == 10000
-    assert schedule.finetune_start_step == 8696
+    assert schedule.max_steps == 30000
+    assert schedule.finetune_start_step == 26087
     assert schedule.finetune_ramp_steps == 500
-    assert schedule.warmup_steps == 111
-    assert schedule.lr_decay_step == 5565
-    assert not submission._use_finetune_loss({**cfg, "_runtime": {"step": 8695}})
-    assert submission._use_finetune_loss({**cfg, "_runtime": {"step": 8696}})
+    assert schedule.warmup_steps == 334
+    assert schedule.lr_decay_step == 16696
+    assert not submission._use_finetune_loss({**cfg, "_runtime": {"step": 26086}})
+    assert submission._use_finetune_loss({**cfg, "_runtime": {"step": 26087}})
 
 
 def test_minalphafold2_finetune_ramp_weight_scales_linearly() -> None:
     cfg = yaml.safe_load(Path("submissions/minalphafold2/config.yaml").read_text())
 
-    assert submission._finetune_ramp_weight({**cfg, "_runtime": {"step": 8695}}) == pytest.approx(0.0)
-    assert submission._finetune_ramp_weight({**cfg, "_runtime": {"step": 8696}}) == pytest.approx(0.0)
-    assert submission._finetune_ramp_weight({**cfg, "_runtime": {"step": 8946}}) == pytest.approx(0.5)
-    assert submission._finetune_ramp_weight({**cfg, "_runtime": {"step": 9196}}) == pytest.approx(1.0)
-    assert submission._finetune_ramp_weight({**cfg, "_runtime": {"step": 10000}}) == pytest.approx(1.0)
+    assert submission._finetune_ramp_weight({**cfg, "_runtime": {"step": 26086}}) == pytest.approx(0.0)
+    assert submission._finetune_ramp_weight({**cfg, "_runtime": {"step": 26087}}) == pytest.approx(0.0)
+    assert submission._finetune_ramp_weight({**cfg, "_runtime": {"step": 26337}}) == pytest.approx(0.5)
+    assert submission._finetune_ramp_weight({**cfg, "_runtime": {"step": 26587}}) == pytest.approx(1.0)
+    assert submission._finetune_ramp_weight({**cfg, "_runtime": {"step": 30000}}) == pytest.approx(1.0)
 
 
 def test_minalphafold2_finetune_auxiliary_weights_follow_ramp() -> None:
@@ -134,13 +133,13 @@ def test_minalphafold2_handoff_blends_initial_and_finetune_losses(monkeypatch: p
     features = {"aatype": torch.zeros((1, 1), dtype=torch.long)}
     monkeypatch.setattr(submission, "loss_inputs_from_batch", lambda features, model_out: {})
 
-    cfg["_runtime"] = {"step": 8695}
+    cfg["_runtime"] = {"step": 26086}
     assert float(submission._alphafold_loss(model, features, {}, cfg).detach()) == pytest.approx(2.0)
 
-    cfg["_runtime"] = {"step": 8946}
+    cfg["_runtime"] = {"step": 26337}
     assert float(submission._alphafold_loss(model, features, {}, cfg).detach()) == pytest.approx(4.0)
 
-    cfg["_runtime"] = {"step": 9196}
+    cfg["_runtime"] = {"step": 26587}
     assert float(submission._alphafold_loss(model, features, {}, cfg).detach()) == pytest.approx(6.0)
 
 
@@ -152,13 +151,13 @@ def test_minalphafold2_scheduler_uses_af2_lr_stages() -> None:
 
     assert optimizer.param_groups[0]["lr"] == pytest.approx(0.0)
 
-    scheduler.load_state_dict({"completed_steps": 111})
+    scheduler.load_state_dict({"completed_steps": 334})
     assert optimizer.param_groups[0]["lr"] == pytest.approx(1.0e-3)
 
-    scheduler.load_state_dict({"completed_steps": 5565})
+    scheduler.load_state_dict({"completed_steps": 16696})
     assert optimizer.param_groups[0]["lr"] == pytest.approx(9.5e-4)
 
-    scheduler.load_state_dict({"completed_steps": 8696})
+    scheduler.load_state_dict({"completed_steps": 26087})
     assert optimizer.param_groups[0]["lr"] == pytest.approx(4.75e-4)
 
 
@@ -199,7 +198,7 @@ def test_minalphafold2_run_batch_returns_af2_loss() -> None:
 
 def test_minalphafold2_run_batch_returns_finetune_loss_at_handoff() -> None:
     cfg = yaml.safe_load(Path("submissions/minalphafold2/config.yaml").read_text())
-    cfg["_runtime"] = {"step": 8696}
+    cfg["_runtime"] = {"step": 26087}
     model = submission.build_model(cfg)
     batch = _synthetic_supervised_batch()
 

@@ -36,14 +36,14 @@ optim:
   lr_decay_factor: 0.95
 
 train:
-  max_steps: 10000
+  max_steps: 30000
   log_every: 10
   eval_every: 1000
   save_every: 1000
-  grad_accum_steps: 2
-  finetune_start_step: 8696
+  grad_accum_steps: 8
+  finetune_start_step: 26087
   finetune_ramp_steps: 500
   finetune_lr_scale: 0.5
-  warmup_steps: 111
-  lr_decay_step: 5565
+  warmup_steps: 334
+  lr_decay_step: 16696
   amp: false

@@ -14,9 +14,11 @@ def test_load_official_track() -> None:
     assert track.track_id == "limited"
     assert track.train_chain_count == 10000
     assert track.val_chain_count == 1000
-    assert track.max_steps == 10000
-    assert track.sample_budget == 20000
-    assert track.residue_budget == 5120000
+    assert track.effective_batch_size == 8
+    assert track.max_steps == 30000
+    assert track.sample_budget == 240000
+    assert track.residue_budget == 61440000
+    assert track.max_params is None
     assert track.official is True
     assert track.foldscore_weights == FOLDSCORE_WEIGHT_BY_COMPONENT
     assert track.train_manifest_sha256 is not None
@@ -44,22 +46,24 @@ def test_research_large_track_uses_same_data_with_larger_budget() -> None:
     assert research.train_manifest_sha256 == limited.train_manifest_sha256
     assert research.val_manifest_sha256 == limited.val_manifest_sha256
     assert research.train_chain_count == limited.train_chain_count
-    assert research.effective_batch_size == 2
-    assert research.max_steps == 50000
-    assert research.sample_budget == 100000
+    assert research.effective_batch_size == 8
+    assert research.max_steps == 120000
+    assert research.sample_budget == 960000
+    assert research.max_params is None
     assert research.fingerprint_path == "leaderboard/research_large_dataset_fingerprint.json"
 
     fingerprint = json.loads(Path(research.fingerprint_path).read_text())
     assert fingerprint["track_id"] == "research_large"
 
 
-def test_unlimited_track_uses_same_data_without_budget_caps() -> None:
+def test_unlimited_track_uses_same_data_with_fixed_effective_batch_without_budget_caps() -> None:
     limited = load_track_spec("limited")
     unlimited = load_track_spec("unlimited")
 
     assert unlimited.track_id == "unlimited"
     assert unlimited.train_manifest_sha256 == limited.train_manifest_sha256
     assert unlimited.val_manifest_sha256 == limited.val_manifest_sha256
+    assert unlimited.effective_batch_size == 8
     assert unlimited.sample_budget is None
     assert unlimited.residue_budget is None
     assert unlimited.max_params is None

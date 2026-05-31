@@ -17,8 +17,8 @@ The model architecture is loaded directly from
 `third_party/minAlphaFold2/configs/tiny.toml`.
 
 The training protocol scales AlphaFold2's initial/fine-tune sample ratio into
-the official budget. With `max_steps=10000` and effective batch size `2`,
-fine-tuning starts at step `8696`, leaving `1304` optimizer updates for the
+the official budget. With `max_steps=30000` and effective batch size `8`,
+fine-tuning starts at step `26087`, leaving `3913` optimizer updates for the
 fine-tune window. The loss linearly blends from the initial loss to the
 fine-tune loss for the next 500 steps. The learning-rate warmup and one-shot
 decay are scaled from the
@@ -50,10 +50,10 @@ distogram, backbone and all-atom FAPE, torsion, and pLDDT objectives.
 
 ## Required run metadata (limited track)
 
-- max_steps: 10000
-- effective_batch_size: 2
-- sample_budget: 20000
-- residue_budget: 5120000
+- max_steps: 30000
+- effective_batch_size: 8
+- sample_budget: 240000
+- residue_budget: 61440000
 - crop_size: 256
 - seed: 0
 - hardware: pending maintainer benchmark run

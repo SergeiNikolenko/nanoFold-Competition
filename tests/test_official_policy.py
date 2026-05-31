@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -55,9 +56,18 @@ def test_validate_track_policy_passes_after_apply() -> None:
     assert errors == []
 
 
-def test_model_param_limit_is_enforced() -> None:
+def test_public_tracks_do_not_enforce_model_param_limit() -> None:
     track = load_track_spec("limited")
-    assert track.max_params == 100_000_000
+    assert track.max_params is None
+    enforce_model_param_limit(track_spec=track, n_params=10**12)
+
+    research = load_track_spec("research_large")
+    assert research.max_params is None
+    enforce_model_param_limit(track_spec=research, n_params=10**12)
+
+
+def test_model_param_limit_helper_is_enforced_when_track_sets_cap() -> None:
+    track = replace(load_track_spec("limited"), max_params=100_000_000)
     enforce_model_param_limit(track_spec=track, n_params=int(track.max_params))
     with pytest.raises(ValueError):
         enforce_model_param_limit(track_spec=track, n_params=int(track.max_params) + 1)

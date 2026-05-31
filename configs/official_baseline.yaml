@@ -46,9 +46,9 @@ loss:
   global_max_dist: 32.0
 
 train:
-  max_steps: 10000
+  max_steps: 30000
   log_every: 50
   eval_every: 500
   save_every: 500
-  grad_accum_steps: 2
+  grad_accum_steps: 8
   amp: true

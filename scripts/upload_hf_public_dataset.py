@@ -47,6 +47,9 @@ FEATURE_DESCRIPTIONS: tuple[tuple[str, str], ...] = (
     ("split", "Dataset split: train or validation."),
     ("length", "Number of residues after official preprocessing and projection."),
     ("msa_depth", "Number of MSA rows retained in the processed feature file."),
+    ("msa_row_filter_sha256", "SHA256 of the recorded MSA row-filter pass applied to this feature NPZ, or empty if no filter was applied."),
+    ("msa_rows_before_filter", "Number of MSA rows before the recorded row-filter pass, or -1 if unavailable."),
+    ("msa_rows_removed_by_filter", "Number of non-query MSA rows removed in the recorded row-filter pass, or -1 if unavailable."),
     ("template_count", "Number of template hits encoded in the feature tensors; official public data uses T=0."),
     ("aatype", "Target amino-acid IDs with AF2 ordering ARNDCQEGHILKMFPSTWYV plus unknown=20."),
     ("msa", "Tokenized A3M MSA with shape (N, L); 0-19 are residues, 20 unknown, 21 gap, 22 mask."),
@@ -85,6 +88,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--processed-labels-dir", type=Path, default=DEFAULT_LABELS_DIR)
     parser.add_argument("--fingerprint", type=Path, default=DEFAULT_FINGERPRINT)
     parser.add_argument("--manifest-lock", type=Path, default=DEFAULT_MANIFEST_LOCK)
+    parser.add_argument(
+        "--msa-row-filter-source-lock",
+        type=Path,
+        default=None,
+        help="Optional public-safe source lock for MSA row filtering metadata to upload under metadata/.",
+    )
     parser.add_argument(
         "--eval-yaml",
         type=Path,
@@ -158,6 +167,12 @@ def _optional_int(data: Mapping[str, np.ndarray], key: str) -> int:
     return int(np.asarray(data[key]).item())
 
 
+def _optional_str(data: Mapping[str, np.ndarray], key: str) -> str:
+    if key not in data:
+        return ""
+    return str(np.asarray(data[key]).item())
+
+
 def _check_npz_chain_id(data: Mapping[str, np.ndarray], expected_chain_id: str, path: Path) -> None:
     if "chain_id" not in data:
         return
@@ -204,6 +219,9 @@ def _public_row(
         "split": split,
         "length": length,
         "msa_depth": int(msa.shape[0]),
+        "msa_row_filter_sha256": _optional_str(features, "msa_row_filter_sha256"),
+        "msa_rows_before_filter": _optional_int(features, "msa_rows_before_filter"),
+        "msa_rows_removed_by_filter": _optional_int(features, "msa_rows_removed_by_filter"),
         "template_count": int(_optional_array(features, "template_aatype", (0, length), "int32").shape[0]),
         "aatype": aatype,
         "msa": msa,
@@ -255,6 +273,9 @@ def build_hf_features(hf_datasets: Any) -> Any:
             "split": hf_datasets.Value("string"),
             "length": hf_datasets.Value("int32"),
             "msa_depth": hf_datasets.Value("int32"),
+            "msa_row_filter_sha256": hf_datasets.Value("string"),
+            "msa_rows_before_filter": hf_datasets.Value("int32"),
+            "msa_rows_removed_by_filter": hf_datasets.Value("int32"),
             "template_count": hf_datasets.Value("int32"),
             "aatype": hf_datasets.List(hf_datasets.Value("int32")),
             "msa": hf_datasets.List(hf_datasets.List(hf_datasets.Value("int32"))),
@@ -316,6 +337,27 @@ def _load_fingerprint(path: Path) -> dict[str, Any]:
     return raw
 
 
+def _load_msa_row_filter_source_lock(path: Path | None) -> dict[str, Any]:
+    if path is None or not path.exists():
+        return {}
+    raw = json.loads(path.read_text())
+    if not isinstance(raw, dict):
+        raise ValueError(f"MSA row filter source lock must be a JSON object: {path}")
+    aggregate = raw.get("aggregate_processed_filtering")
+    row_filter = raw.get("msa_row_filter")
+    if not isinstance(aggregate, Mapping) or not isinstance(row_filter, Mapping):
+        raise ValueError(f"MSA row filter source lock is missing expected sections: {path}")
+    return {
+        "path": str(path),
+        "sha256": sha256_file(path),
+        "filter_sha256": str(row_filter.get("sha256", "")),
+        "excluded_sequence_count": row_filter.get("excluded_sequence_count"),
+        "cumulative_msa_rows_removed": aggregate.get("cumulative_msa_rows_removed"),
+        "final_total_msa_rows_after_filter": aggregate.get("final_total_msa_rows_after_filter"),
+        "pass_count": aggregate.get("pass_count"),
+    }
+
+
 def _summary(args: argparse.Namespace) -> dict[str, Any]:
     train_ids = read_manifest(args.train_manifest)
     val_ids = read_manifest(args.val_manifest)
@@ -327,6 +369,7 @@ def _summary(args: argparse.Namespace) -> dict[str, Any]:
         "train_manifest_sha256": sha256_file(args.train_manifest),
         "validation_manifest_sha256": sha256_file(args.val_manifest),
         "dataset_fingerprint": fingerprint,
+        "msa_row_filter_source_lock": _load_msa_row_filter_source_lock(args.msa_row_filter_source_lock),
     }
 
 
@@ -337,6 +380,20 @@ def render_dataset_card(summary: Mapping[str, Any]) -> str:
     if isinstance(fingerprint, Mapping):
         feature_files_sha256 = str(fingerprint.get("feature_files_sha256", ""))
         label_files_sha256 = str(fingerprint.get("label_files_sha256", ""))
+
+    msa_filter = summary.get("msa_row_filter_source_lock", {})
+    msa_filter_section = ""
+    if isinstance(msa_filter, Mapping) and msa_filter:
+        msa_filter_section = f"""
+## MSA Row Filtering
+
+This release applies held-out-target MSA row filtering to remove non-query MSA rows homologous to public-validation and sealed hidden-validation targets before publishing the public train/validation features. Query rows are preserved. Per-row metadata for the recorded feature-filtering pass is exposed as `msa_row_filter_sha256`, `msa_rows_before_filter`, and `msa_rows_removed_by_filter`; the public-safe source lock records the aggregate multi-pass filtering summary.
+
+- MSA row filter SHA256: `{msa_filter.get("filter_sha256", "")}`
+- public-safe source lock SHA256: `{msa_filter.get("sha256", "")}`
+- excluded MSA-row sequence hashes: `{msa_filter.get("excluded_sequence_count", "")}`
+- cumulative MSA rows removed across filtering passes: `{msa_filter.get("cumulative_msa_rows_removed", "")}`
+"""
 
     feature_rows = "\n".join(f"| `{name}` | {description} |" for name, description in FEATURE_DESCRIPTIONS)
 
@@ -384,6 +441,7 @@ The candidate pool was filtered to keep the benchmark small, clean, and learnabl
 The split was then sampled with leakage controls and structural stratification. Chains were grouped to keep PDB entries and coarse sequence clusters disjoint across splits. The public train/validation allocation was balanced across broad structural and quality metadata, including secondary-structure class, domain-architecture class, length bin, and resolution bin. These fields are derived from OpenFold/OpenProteinSet chain metadata together with structural classification sources used by NanoFold's manifest builder.
 
 The goal is not to mirror the full PDB distribution perfectly. The goal is a representative, fixed, tractable slice of protein fold space that rewards models that learn useful geometry from limited biological data.
+{msa_filter_section}
 
 ## Splits
 
@@ -482,6 +540,8 @@ def _validate_public_inputs(args: argparse.Namespace) -> None:
         args.manifest_lock,
     )
     missing = [str(path) for path in required if not Path(path).exists()]
+    if args.msa_row_filter_source_lock is not None and not args.msa_row_filter_source_lock.exists():
+        missing.append(str(args.msa_row_filter_source_lock))
     if missing:
         raise FileNotFoundError("Missing required public dataset input(s): " + ", ".join(missing))
 
@@ -513,9 +573,10 @@ def _upload_auxiliary_files(args: argparse.Namespace, huggingface_hub: Any, read
         (args.all_manifest, "manifests/all.txt"),
         (args.fingerprint, "metadata/official_dataset_fingerprint.json"),
         (args.manifest_lock, "metadata/official_manifest_source.lock.json"),
+        (args.msa_row_filter_source_lock, "metadata/msa_row_filter_source_lock_public_safe.json"),
     )
     for local_path, path_in_repo in auxiliary_files:
-        if not local_path.exists():
+        if local_path is None or not local_path.exists():
             continue
         api.upload_file(
             repo_id=args.repo_id,

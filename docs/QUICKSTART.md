@@ -10,9 +10,9 @@ Use `limited` for your first run. The other tracks use the same public data setu
 
 | Track | Purpose | Budget | Ranking | Local command pattern | PR label/description |
 |---|---|---:|---|---|---|
-| `limited` | main accessible slowrun leaderboard | `20,000` samples | hidden CASP15-inspired FoldScore AUC | `--track limited --official` | `Track: limited` |
-| `research_large` | larger fixed-data slowrun for deeper optimization studies | `100,000` samples | hidden CASP15-inspired FoldScore AUC | `--track research_large --official` | `Track: research_large` |
-| `unlimited` | open-ended fixed-data run for best final hidden quality | unrestricted | final hidden FoldScore | `--track unlimited --official` | `Track: unlimited` |
+| `limited` | main accessible slowrun leaderboard | `240,000` samples | hidden CASP15-inspired FoldScore AUC | `--track limited --official` | `Track: limited` |
+| `research_large` | larger fixed-data slowrun for deeper optimization studies | `960,000` samples | hidden CASP15-inspired FoldScore AUC | `--track research_large --official` | `Track: research_large` |
+| `unlimited` | open-ended fixed-data run for best final hidden quality | unrestricted steps, effective batch `8` | final hidden FoldScore | `--track unlimited --official` | `Track: unlimited` |
 
 Set the same track in `submissions/<name>/config.yaml`, every `--track` command, and the pull request description. If you want to enter multiple tracks, keep separate configs or separate submission directories so each run is reproducible.
 

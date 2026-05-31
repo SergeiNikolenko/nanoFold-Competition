@@ -115,7 +115,7 @@ In `--official` mode runtime enforces:
 - fixed manifest path policy
 - pinned manifest SHA checks (when present in track)
 - dataset fingerprint verification
-- model parameter cap (`model.max_params`) if set
+- trainable parameter count reporting; `model.max_params` is only enforced if a custom track sets it
 - official prediction sanitizes `data.processed_labels_dir` before submission hooks are constructed
 
 This keeps the benchmark focused on fixed-data learning. Public validation can be used for debugging, but hidden ranking is sealed and scoring never imports submission hooks.
@@ -145,7 +145,7 @@ FoldScore =
 + 0.125*(MolProbity-clash-atom14 + BB-atom14 + DipDiff-atom14)
 ```
 
-Hidden leaderboard ranking is track-specific. `limited` and `research_large` use `foldscore_auc_hidden`, trapezoidal AUC over cumulative samples from `0` to `B_sample`, with `final_hidden_foldscore` as the tie-breaker. `unlimited` uses `final_hidden_foldscore` because it has no shared sample budget.
+Hidden leaderboard ranking is track-specific. `limited` and `research_large` use `foldscore_auc_hidden`, trapezoidal AUC over cumulative samples from `0` to `B_sample`, with `final_hidden_foldscore` as the tie-breaker. `unlimited` fixes effective batch size at `8` but uses `final_hidden_foldscore` because it has no shared max-step or sample budget.
 
 Leaderboard JSON entries include `name` and `submission_path` fields. The
 rendered README leaderboard hyperlinks `name` to `submission_path` for the

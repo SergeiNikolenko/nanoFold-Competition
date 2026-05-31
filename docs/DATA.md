@@ -132,6 +132,23 @@ That script does five things:
 4. Downloads the manifest mmCIF subset from RCSB when `--mmcif-mode subset` is used.
 5. Runs `scripts/preprocess.py` separately for train and public validation manifests.
 
+Maintainer/research refreshes can pass `--msa-row-filter <json>` to
+`scripts/setup_official_data.sh` or `scripts/full_official_data_refresh.sh`.
+The filter JSON is built with `scripts/build_msa_row_filter.py` from held-out
+target sequences and source MSA rows. It stores only SHA256 hashes of ungapped
+MSA-row sequences to remove. Hidden-validation filters are private artifacts and
+must not be published if they were built using hidden target sequences.
+When auditing existing processed features instead of raw A3Ms,
+`--source-processed-features-dir` can be repeated so public and private hidden
+feature roots are scanned together.
+
+MSA split audits live in `scripts/audit_msa_split.py`. The script reports
+processed feature availability, MSA-depth quantiles and binned Jensen-Shannon
+divergence, target chain/cluster overlap, exact processed MSA-row overlap,
+optional MMseqs target-to-train-MSA homology, and optional raw A3M hit-identifier
+overlap. Its default JSON output avoids raw sequences and hidden identifiers;
+only use example/identifier flags for public or private sealed reports.
+
 If preprocessing is interrupted, rerun the same command with:
 
 ```bash
@@ -504,15 +521,64 @@ For each chain ID, preprocessing:
 1. Resolves the encoded OpenProteinSet chain directory.
 2. Reads one or more A3M files.
 3. Removes query-gap columns from the MSA.
-4. Merges and deduplicates MSA rows.
-5. Caps raw MSA depth with `--max-msa-seqs` before writing NPZ files.
-6. Loads the matching mmCIF file.
-7. Extracts chain atom coordinates into the canonical atom14 layout.
-8. Aligns the mmCIF structure sequence to the MSA query sequence.
-9. Projects atom14 coordinates onto query positions.
-10. Rejects chains that fail projection quality thresholds.
-11. Writes one feature NPZ and one label NPZ per chain.
-12. Writes `preprocess_meta.json` into the feature directory.
+4. Optionally removes non-query MSA rows whose ungapped sequence hash appears
+   in `--msa-row-filter`, always preserving the query row.
+5. Merges and deduplicates MSA rows.
+6. Caps raw MSA depth with `--max-msa-seqs` before writing NPZ files.
+7. Loads the matching mmCIF file.
+8. Extracts chain atom coordinates into the canonical atom14 layout.
+9. Aligns the mmCIF structure sequence to the MSA query sequence.
+10. Projects atom14 coordinates onto query positions.
+11. Rejects chains that fail projection quality thresholds.
+12. Writes one feature NPZ and one label NPZ per chain.
+13. Writes `preprocess_meta.json` into the feature directory.
+
+The MSA row filter is meant to sanitize evolutionary input features against
+held-out target homologs. The recommended split-aligned threshold is `30%`
+sequence identity with `80%` coverage. Filtering runs before `--max-msa-seqs`,
+so deeper non-filtered rows can backfill rows removed near the top of an MSA.
+When enabled, preprocessing writes `msa_row_filter_sha256`,
+`msa_rows_before_filter`, and `msa_rows_removed_by_filter` into each feature NPZ
+and writes `msa_row_filter_audit.json` into the feature directory. The filter
+hash is also folded into `preprocess_meta.json` and therefore into dataset
+fingerprints.
+
+Use `scripts/audit_msa_split.py` before and after filtered regeneration to
+compare feature availability, MSA depth bins, exact row overlap, optional MMseqs
+homology hits, and available raw A3M hit-identifier overlap. Hidden validation
+audits should be reported only as aggregate counts.
+
+For private pre-regeneration checks, `scripts/build_msa_row_filter.py` can build
+a processed-feature filter by repeating `--source-processed-features-dir` for
+the public feature root and the private hidden feature root. That produces a
+de-identified filter for current features, but official camera-ready
+regeneration should prefer raw A3Ms when all source alignments are available so
+filtering still occurs before depth capping.
+
+If raw alignments are incomplete but current processed NPZs are available,
+`scripts/filter_processed_msa_features.py` can apply the same filter to existing
+features and write a new feature root plus
+`processed_msa_row_filter_audit.json`. This preserves all feature arrays except
+`msa` and `deletions`, always keeps the query row, records
+`msa_row_filter_sha256`, and writes a `preprocess_meta.json` that makes the
+processed-feature-filtered state fingerprintable. This path is useful for
+private audits and sanitized-MSA reruns, but it cannot recover deeper raw MSA
+rows that were already removed by the original depth cap.
+
+Because large MMseqs searches can expose additional residual hits on a
+verification pass, use `scripts/extend_msa_row_filter_from_audit.py` as a
+closure step when `scripts/audit_msa_split.py --run-mmseqs` reports
+post-filter source rows. The closure helper maps the anonymous `trainmsa_N`
+audit headers back to stable sequence hashes, extends the de-identified filter,
+and should be followed by another filtering/audit cycle until the MMseqs hit
+count is zero.
+
+Use `scripts/write_msa_row_filter_source_lock.py` after filtering to create a
+compact audit/source-lock summary. By default it redacts private paths and
+private manifest hashes and omits raw sequences, excluded sequence-hash lists,
+and per-chain processed-feature rows while retaining thresholds, normalized
+MMseqs settings, manifest counts, public manifest hashes, filter hashes, and
+aggregate row-removal counts.
 
 Official projection thresholds:
 
@@ -537,6 +603,7 @@ Feature NPZ keys:
 | `template_ca_coords` | `(T, L, 3)` | `float32` | Template C-alpha coordinates. Official track uses `T=0`. |
 | `template_ca_mask` | `(T, L)` | `bool` | Template coordinate mask. Official track uses `T=0`. |
 | `projection_*` | scalar | numeric | Projection diagnostics used for audit/debugging. |
+| `msa_row_filter_*` | scalar | mixed | Present only when `--msa-row-filter` is used; records the filter hash and row-removal counts. |
 
 Label NPZ keys:
 
@@ -813,4 +880,4 @@ not ask for model confidence estimates.
 molecular-replacement scoring. C-alpha, GDT_TS, and backbone atom14 lDDT remain
 diagnostic outputs.
 
-Hidden leaderboard rank is track-specific. `limited` and `research_large` use `foldscore_auc_hidden`, computed across official checkpoint predictions over the fixed sample budget. `unlimited` uses the final hidden FoldScore.
+Hidden leaderboard rank is track-specific. `limited` and `research_large` use `foldscore_auc_hidden`, computed across official checkpoint predictions over the fixed sample budget. `unlimited` fixes effective batch size at `8` but uses the final hidden FoldScore because it has no shared max-step or sample budget.

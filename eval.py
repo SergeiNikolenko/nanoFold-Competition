@@ -360,6 +360,15 @@ def _score_chain(
     has_atom14_labels = "atom14_positions" in labels and "atom14_mask" in labels
     if not has_atom14_labels:
         raise ValueError("FoldScore eval requires label atom14_positions/atom14_mask.")
+    device = pred_atom14.device
+    labels = {
+        name: value.to(device=device, non_blocking=True) if torch.is_tensor(value) else value
+        for name, value in labels.items()
+    }
+    features = {
+        name: value.to(device=device, non_blocking=True) if torch.is_tensor(value) else value
+        for name, value in features.items()
+    }
     comps = foldscore_components(
         pred_atom14=pred_atom14,
         true_atom14=labels["atom14_positions"],
@@ -604,7 +613,8 @@ def main() -> None:
                         training=False,
                         expose_supervision=include_labels,
                     )
-                pred_atom14_cpu = run_out["pred_atom14"].detach().cpu()
+                pred_atom14 = run_out["pred_atom14"].detach()
+                pred_atom14_cpu = pred_atom14.detach().cpu() if save_pred_root is not None else None
                 if "loss" in run_out:
                     losses.append(run_out["loss"].detach().cpu())
                 for metric_name, metric_value in _scalar_output_metrics(run_out).items():
@@ -616,6 +626,7 @@ def main() -> None:
                     length = int(residue_mask[idx].numel())
 
                     if save_pred_root is not None:
+                        assert pred_atom14_cpu is not None
                         arrays: Dict[str, Any] = {
                             "pred_atom14": pred_atom14_cpu[idx][:masked_length].numpy().astype(np.float32),
                             "masked_length": np.array(masked_length, dtype=np.int32),
@@ -625,14 +636,14 @@ def main() -> None:
 
                     if include_labels:
                         label_tensors: Dict[str, torch.Tensor] = {
-                            "ca_coords": batch["ca_coords"][idx][:masked_length],
-                            "ca_mask": batch["ca_mask"][idx][:masked_length],
+                            "ca_coords": batch_device["ca_coords"][idx][:masked_length],
+                            "ca_mask": batch_device["ca_mask"][idx][:masked_length],
                         }
-                        label_tensors["atom14_positions"] = batch["atom14_positions"][idx][:masked_length]
-                        label_tensors["atom14_mask"] = batch["atom14_mask"][idx][:masked_length]
-                        feature_tensors = {"aatype": batch["aatype"][idx][:masked_length]}
+                        label_tensors["atom14_positions"] = batch_device["atom14_positions"][idx][:masked_length]
+                        label_tensors["atom14_mask"] = batch_device["atom14_mask"][idx][:masked_length]
+                        feature_tensors = {"aatype": batch_device["aatype"][idx][:masked_length]}
                         chain_metrics = _score_chain(
-                            pred_atom14=pred_atom14_cpu[idx][:masked_length],
+                            pred_atom14=pred_atom14[idx][:masked_length],
                             labels=label_tensors,
                             features=feature_tensors,
                         )
@@ -650,7 +661,7 @@ def main() -> None:
                             crop_mode=crop_mode,
                         )
                         chain_metrics = _score_chain(
-                            pred_atom14=pred_atom14_cpu[idx][:masked_length],
+                            pred_atom14=pred_atom14[idx][:masked_length],
                             labels=labels,
                             features=features,
                         )

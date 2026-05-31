@@ -89,9 +89,9 @@ Source of truth: `tracks/*.yaml`. All tracks use the same official public train 
 
 | Track | Purpose | Fixed training budget | Rank metric | Use this when | Submit with |
 |---|---|---:|---|---|---|
-| `limited` | Main accessible slowrun leaderboard | `20,000` samples (`10,000` steps x effective batch `2`) | `foldscore_auc_hidden` | you want the primary competition result under a small, reproducible budget | `--track limited` |
-| `research_large` | Larger fixed-data research leaderboard | `100,000` samples (`50,000` steps x effective batch `2`) | `foldscore_auc_hidden` | you want to study whether an approach still wins with more optimization while using the same data | `--track research_large` |
-| `unlimited` | Open-ended fixed-data research leaderboard | unrestricted training budget and model size | `final_hidden_foldscore` | you want the best final hidden structure quality while keeping the hidden set sealed and the public data contract fixed | `--track unlimited` |
+| `limited` | Main accessible slowrun leaderboard | `240,000` samples (`30,000` steps x effective batch `8`) | `foldscore_auc_hidden` | you want the primary competition result under a small, reproducible budget | `--track limited` |
+| `research_large` | Larger fixed-data research leaderboard | `960,000` samples (`120,000` steps x effective batch `8`) | `foldscore_auc_hidden` | you want to study whether an approach still wins with more optimization while using the same data | `--track research_large` |
+| `unlimited` | Open-ended fixed-data research leaderboard | unrestricted steps and model size with effective batch `8` | `final_hidden_foldscore` | you want the best final hidden structure quality while keeping the hidden set sealed and the public data contract fixed | `--track unlimited` |
 
 For all three tracks, set `track: <track_id>` in `submissions/<name>/config.yaml`, validate with `python scripts/validate_submission.py --submission submissions/<name> --track <track_id> --strict`, and open a submission PR naming the intended track. Submit separate configs or separate submission directories when one method targets multiple tracks. Maintainers create accepted leaderboard entries after sealed hidden evaluation; participant PRs should not edit leaderboard artifacts.
 
@@ -112,11 +112,11 @@ The `limited` constants are:
 | Seed | `0` |
 | Crop size | `256` |
 | MSA depth | `192` |
-| Effective batch size | `2` |
-| Max steps | `10,000` |
-| Sample budget | `20,000` |
-| Residue budget | `5,120,000` |
-| Parameter cap | `100,000,000` trainable parameters |
+| Effective batch size | `8` |
+| Max steps | `30,000` |
+| Sample budget | `240,000` |
+| Residue budget | `61,440,000` |
+| Parameter cap | unrestricted |
 | Tie-breaker | `final_hidden_foldscore` |
 
 ## Split Curation
@@ -163,6 +163,32 @@ Preprocessing run metadata is captured in `<processed_features_dir>/preprocess_m
 
 Official scoring requires atom14 labels, and submissions must return `pred_atom14` shaped `(B, L, 14, 3)`. The runtime derives the Cα view from atom14 slot 1 for diagnostics.
 
+Maintainer/research preprocessing can pass `--msa-row-filter` with a JSON filter
+from `scripts/build_msa_row_filter.py`. This removes non-query MSA rows
+homologous to held-out target sequences before the MSA depth cap is applied,
+preserves each chain's query row, and records the filter hash in both feature
+NPZs and preprocessing metadata.
+
+Maintainers can audit MSA availability, MSA-depth balance, exact processed-row
+overlap, optional MMseqs homology, and raw A3M hit-identifier overlap with
+`scripts/audit_msa_split.py`. Hidden-audit reports should keep the default
+identifier-free output unless private artifacts stay sealed.
+For private checks over current feature NPZs, repeat
+`--source-processed-features-dir` when building the row filter so public and
+private hidden feature roots are scanned together.
+When raw A3Ms are incomplete locally, maintainers can apply the resulting filter
+to existing feature NPZs with `scripts/filter_processed_msa_features.py`. This
+is a processed-feature fallback for audits or reruns; full official
+regeneration should still use `scripts/preprocess.py --msa-row-filter` so
+filtering happens before the MSA depth cap.
+If a post-filter MMseqs audit finds residual hits, use
+`scripts/extend_msa_row_filter_from_audit.py` to add those anonymous source-row
+hashes to a closure filter, then reapply and audit again.
+Use `scripts/write_msa_row_filter_source_lock.py` to summarize the final filter
+and processed-feature filtering passes into a compact audit/source-lock record
+without raw sequences, per-chain audit rows, hidden chain IDs, or excluded hash
+lists.
+
 The official tracks disable templates by preprocessing with `T=0`; template-enabled tracks require explicit leakage filters.
 
 Config schema uses:
@@ -174,7 +200,7 @@ Config schema uses:
 In `--official` mode, the runner applies override + validate:
 - immutable track constants are forced into config at startup
 - then policy validation and manifest hash checks run
-- model parameter cap is enforced from track policy (`model.max_params`)
+- trainable parameter count is reported; no public track enforces a hard parameter cap
 
 This is implemented in:
 - `nanofold/competition_policy.py`

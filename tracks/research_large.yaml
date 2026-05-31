@@ -37,9 +37,9 @@ train:
   seed: 0
   crop_size: 256
   msa_depth: 192
-  effective_batch_size: 2
-  max_steps: 50000
+  effective_batch_size: 8
+  max_steps: 120000
   val_crop_mode: center
   val_msa_sample_mode: top
 model:
-  max_params: 100000000
+  max_params: null

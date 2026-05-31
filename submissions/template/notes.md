@@ -20,10 +20,10 @@ Summarize the expected gains and intuition behind your method.
 
 ## Required run metadata (`limited`)
 
-- max_steps: 10000
-- effective_batch_size: 2
-- sample_budget: 20000
-- residue_budget: 5120000
+- max_steps: 30000
+- effective_batch_size: 8
+- sample_budget: 240000
+- residue_budget: 61440000
 - crop_size: 256
 - seed: 0
 - hardware: pending maintainer benchmark run

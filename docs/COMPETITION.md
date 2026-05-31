@@ -22,9 +22,9 @@ Track policy is defined in `tracks/*.yaml`. The public track set is:
 
 | Track | Purpose | Data contract | Training budget | Rank metric | Submission selector |
 |---|---|---|---:|---|---|
-| `limited` | primary competition track for accessible data-efficiency work | official train/public val/hidden val only | `20,000` samples (`10,000` steps x effective batch `2`) | `foldscore_auc_hidden` | `--track limited` |
-| `research_large` | larger fixed-data track for methods that need more optimization to show their shape | same official data and hidden evaluation as `limited` | `100,000` samples (`50,000` steps x effective batch `2`) | `foldscore_auc_hidden` | `--track research_large` |
-| `unlimited` | open-ended fixed-data track for best final structure quality under sealed hidden evaluation | same official data and hidden evaluation as `limited` | unrestricted | `final_hidden_foldscore` | `--track unlimited` |
+| `limited` | primary competition track for accessible data-efficiency work | official train/public val/hidden val only | `240,000` samples (`30,000` steps x effective batch `8`) | `foldscore_auc_hidden` | `--track limited` |
+| `research_large` | larger fixed-data track for methods that need more optimization to show their shape | same official data and hidden evaluation as `limited` | `960,000` samples (`120,000` steps x effective batch `8`) | `foldscore_auc_hidden` | `--track research_large` |
+| `unlimited` | open-ended fixed-data track for best final structure quality under sealed hidden evaluation | same official data and hidden evaluation as `limited` | unrestricted steps with effective batch `8` | `final_hidden_foldscore` | `--track unlimited` |
 
 All three tracks use CASP15-inspired FoldScore, hidden labels remain sealed, templates are disabled, and public validation is diagnostic only. `limited` and `research_large` are sample-budget slowruns, so they rank by hidden area under the learning curve. `unlimited` is ranked separately by final hidden FoldScore because there is no common sample axis.
 
@@ -37,7 +37,7 @@ Participants submit code/configuration PRs for a chosen track and provide the la
 In official mode the runtime uses **override + validate**:
 - immutable constants from track policy are applied to config first
 - policy validation then checks budget/paths/hashes
-- model parameter cap from track (`model.max_params`) is enforced
+- trainable parameter count is reported; public tracks do not enforce a hard parameter cap
 
 ## 2) Allowed and Disallowed Data
 
@@ -171,6 +171,23 @@ This command verifies the committed public manifest hashes, downloads the requir
 
 The setup script expects `aws`, `unzip`, and `python` on `PATH`; it keeps hidden validation assets out of the public setup path.
 
+Maintainer/research refreshes that need held-out-homolog MSA sanitization can
+build a SHA256-only filter with `scripts/build_msa_row_filter.py` and pass it as
+`--msa-row-filter <json>` to `scripts/setup_official_data.sh` or
+`scripts/full_official_data_refresh.sh`. The filter removes non-query MSA rows
+before the depth cap while preserving each chain's query row. Filters built
+against hidden validation targets are private artifacts and must not be
+published.
+
+Use `scripts/audit_msa_split.py` to audit public or private split MSA state. It
+reports MSA availability/depth balance, binned MSA-depth JS divergence, target
+chain/cluster disjointness, exact processed-row overlap, optional MMseqs
+homology, and optional raw A3M identifier overlap without exposing hidden
+identifiers by default.
+When building a private processed-feature filter, repeat
+`--source-processed-features-dir` so the public feature root and private hidden
+feature root are scanned together.
+
 Maintainer manifest generation path:
 - `scripts/build_manifests.py`
 - `scripts/regenerate_official_manifests.sh`
@@ -229,6 +246,19 @@ Fingerprint includes:
 - label file hash aggregate
 - track, source-lock, and preprocessing metadata
 
+Maintainer-only sanitized feature roots produced by
+`scripts/filter_processed_msa_features.py` also write `preprocess_meta.json`
+with `msa_row_filter_sha256`, so their fingerprints differ from the original
+processed features. Official public releases should prefer raw preprocessing
+with `scripts/preprocess.py --msa-row-filter` when all raw alignments are
+available. Post-filter MMseqs residuals should be folded back into the filter
+with `scripts/extend_msa_row_filter_from_audit.py` and re-audited to zero hits.
+When sanitized features are audited for release or rebuttal, use
+`scripts/write_msa_row_filter_source_lock.py` to produce a compact public-safe
+source-lock summary with the row-filter hash, thresholds, normalized MMseqs
+settings, manifest counts, public manifest hashes, and aggregate row-removal
+counts.
+
 Official mode requirements:
 - pinned manifest SHA checks
 - fingerprint verification
@@ -245,9 +275,9 @@ Track budget constants:
 
 | Track | Seed | Crop size | MSA depth | Effective batch | Max steps | Sample budget | Residue budget | Parameter cap |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `limited` | `0` | `256` | `192` | `2` | `10,000` | `20,000` | `5,120,000` | `100,000,000` |
-| `research_large` | `0` | `256` | `192` | `2` | `50,000` | `100,000` | `25,600,000` | `100,000,000` |
-| `unlimited` | submitter-defined | submitter-defined | submitter-defined | submitter-defined | submitter-defined | unrestricted | unrestricted | unrestricted |
+| `limited` | `0` | `256` | `192` | `8` | `30,000` | `240,000` | `61,440,000` | unrestricted |
+| `research_large` | `0` | `256` | `192` | `8` | `120,000` | `960,000` | `245,760,000` | unrestricted |
+| `unlimited` | submitter-defined | submitter-defined | submitter-defined | `8` | submitter-defined | unrestricted | unrestricted | unrestricted |
 
 All tracks use deterministic public validation settings (`center`, `top`) when the track defines them.
 

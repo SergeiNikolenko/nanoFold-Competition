@@ -32,13 +32,14 @@ fingerprint verification.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 from Bio.Align import PairwiseAligner
@@ -49,7 +50,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from nanofold.a3m import read_a3m, sequence_to_ids, ungap_query_columns
+from nanofold.a3m import GAP_ID, MASK_ID, RESTYPES, read_a3m, sequence_to_ids, ungap_query_columns
 from nanofold.chain_paths import chain_data_dir, chain_error_path, chain_npz_path
 from nanofold.mmcif import extract_chain_atoms
 from nanofold.residue_constants import ATOM14_NUM_SLOTS, CA_ATOM14_SLOT
@@ -89,6 +90,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     ap.add_argument("--max-msa-seqs", type=int, default=2048, help="Cap raw MSA depth to keep files smaller")
+    ap.add_argument(
+        "--msa-row-filter",
+        type=str,
+        default="",
+        help=(
+            "Optional JSON from scripts/build_msa_row_filter.py. Non-query MSA rows whose ungapped "
+            "sequence hash appears in the filter are removed before --max-msa-seqs is applied."
+        ),
+    )
     ap.add_argument("--template-hhr-name", type=str, default="pdb70_hits.hhr", help="Template hits file name under chain dir")
     ap.add_argument("--max-templates", type=int, default=1, help="Maximum number of template hits to include per chain")
     ap.add_argument("--disable-templates", action="store_true", help="Do not attempt to include template features")
@@ -137,6 +147,25 @@ class HHRHit:
     query_aligned: str
     template_aligned: str
     aligned_pairs: Tuple[Tuple[int, int], ...]
+
+
+@dataclass(frozen=True)
+class MSARowFilter:
+    path: Path
+    sha256: str
+    excluded_sequence_sha256: frozenset[str]
+
+
+@dataclass(frozen=True)
+class MSAFilterStats:
+    input_rows: int = 0
+    removed_rows: int = 0
+
+    def merge(self, other: "MSAFilterStats") -> "MSAFilterStats":
+        return MSAFilterStats(
+            input_rows=self.input_rows + other.input_rows,
+            removed_rows=self.removed_rows + other.removed_rows,
+        )
 
 
 def _parse_hhr_token(token: str) -> Optional[Tuple[str, str]]:
@@ -332,13 +361,86 @@ def _find_msa_path(chain_dir: Path, msa_name: str) -> Path | None:
     return None
 
 
+MSA_TOKEN_TO_AA = {idx: aa for idx, aa in enumerate(RESTYPES)}
+MSA_TOKEN_TO_AA[20] = "X"
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _sequence_sha256(sequence: str) -> str:
+    return hashlib.sha256(sequence.upper().encode("utf-8")).hexdigest()
+
+
+def _msa_row_to_ungapped_sequence(row: np.ndarray) -> str:
+    chars: List[str] = []
+    for value in row.tolist():
+        token = int(value)
+        if token in (GAP_ID, MASK_ID):
+            continue
+        chars.append(MSA_TOKEN_TO_AA.get(token, "X"))
+    return "".join(chars)
+
+
+def _load_msa_row_filter(path_value: str | Path) -> MSARowFilter | None:
+    path_text = str(path_value).strip()
+    if not path_text:
+        return None
+    path = Path(path_text)
+    raw = json.loads(path.read_text())
+    if not isinstance(raw, dict):
+        raise ValueError(f"MSA row filter must be a JSON object: {path}")
+    values = raw.get("excluded_sequence_sha256")
+    if not isinstance(values, list):
+        raise ValueError(f"MSA row filter missing `excluded_sequence_sha256` list: {path}")
+    excluded: set[str] = set()
+    for value in values:
+        text = str(value).strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", text):
+            raise ValueError(f"Bad sequence SHA256 in MSA row filter {path}: {value!r}")
+        excluded.add(text)
+    return MSARowFilter(path=path, sha256=_sha256_file(path), excluded_sequence_sha256=frozenset(excluded))
+
+
+def _apply_msa_row_filter(
+    msa: np.ndarray,
+    deletions: np.ndarray,
+    row_filter: MSARowFilter | None,
+) -> Tuple[np.ndarray, np.ndarray, MSAFilterStats]:
+    if row_filter is None:
+        return msa, deletions, MSAFilterStats(input_rows=int(msa.shape[0]), removed_rows=0)
+
+    keep: List[int] = []
+    removed = 0
+    for row_index, row in enumerate(msa):
+        if row_index == 0:
+            keep.append(row_index)
+            continue
+        sequence = _msa_row_to_ungapped_sequence(row)
+        if _sequence_sha256(sequence) in row_filter.excluded_sequence_sha256:
+            removed += 1
+            continue
+        keep.append(row_index)
+    if not keep:
+        keep = [0]
+        removed = max(0, int(msa.shape[0]) - 1)
+    keep_array = np.asarray(keep, dtype=np.int64)
+    return (
+        msa[keep_array],
+        deletions[keep_array],
+        MSAFilterStats(input_rows=int(msa.shape[0]), removed_rows=int(removed)),
+    )
+
+
 def _read_merged_msa(
     chain_dir: Path,
     *,
     msa_name: str,
     msa_names: str | Sequence[str] | None,
     max_msa_seqs: int,
-) -> Tuple[np.ndarray, np.ndarray, str]:
+    msa_row_filter: MSARowFilter | None = None,
+) -> Tuple[np.ndarray, np.ndarray, str, MSAFilterStats]:
     resolved_names = _resolve_msa_names(msa_name, msa_names)
     merged_rows: List[np.ndarray] = []
     merged_deletions: List[np.ndarray] = []
@@ -346,6 +448,7 @@ def _read_merged_msa(
     loaded_paths: List[Path] = []
     query_sequence: str | None = None
     row_limit = max(0, int(max_msa_seqs))
+    filter_stats = MSAFilterStats()
 
     for source_name in resolved_names:
         msa_path = _find_msa_path(chain_dir, source_name)
@@ -353,7 +456,7 @@ def _read_merged_msa(
             continue
 
         a3m = read_a3m(msa_path)
-        source_msa, source_deletions = a3m.to_tokens(max_seqs=row_limit or None)
+        source_msa, source_deletions = a3m.to_tokens(max_seqs=None if msa_row_filter is not None else (row_limit or None))
         aligned_msa, _ = a3m.to_aligned_msa()
         query_aligned = aligned_msa[0]
         source_msa, source_deletions, source_query_sequence = ungap_query_columns(
@@ -361,6 +464,12 @@ def _read_merged_msa(
             deletions=source_deletions,
             query_aligned=query_aligned,
         )
+        source_msa, source_deletions, source_filter_stats = _apply_msa_row_filter(
+            source_msa,
+            source_deletions,
+            msa_row_filter,
+        )
+        filter_stats = filter_stats.merge(source_filter_stats)
         if query_sequence is None:
             query_sequence = source_query_sequence
         elif query_sequence.upper() != source_query_sequence.upper():
@@ -388,7 +497,7 @@ def _read_merged_msa(
     if query_sequence is None or not merged_rows:
         raise ValueError(f"No usable MSA rows found for {chain_dir.name}.")
 
-    return np.stack(merged_rows), np.stack(merged_deletions), query_sequence
+    return np.stack(merged_rows), np.stack(merged_deletions), query_sequence, filter_stats
 
 
 def _project_atom14_to_query(
@@ -567,7 +676,12 @@ def _save_npz(path: Path, arrays: Dict[str, np.ndarray]) -> None:
     np.savez_compressed(path, **arrays)  # type: ignore[arg-type]
 
 
-def _existing_outputs_are_valid(feature_path: Path, label_path: Path) -> bool:
+def _existing_outputs_are_valid(
+    feature_path: Path,
+    label_path: Path,
+    *,
+    expected_msa_row_filter_sha256: str | None,
+) -> bool:
     if not feature_path.exists() or not label_path.exists():
         return False
 
@@ -595,6 +709,15 @@ def _existing_outputs_are_valid(feature_path: Path, label_path: Path) -> bool:
                 return False
             if not required_label_keys.issubset(set(labels.files)):
                 return False
+            feature_keys = set(features.files)
+            if expected_msa_row_filter_sha256 is None:
+                if "msa_row_filter_sha256" in feature_keys:
+                    return False
+            else:
+                if "msa_row_filter_sha256" not in feature_keys:
+                    return False
+                if str(features["msa_row_filter_sha256"].item()) != expected_msa_row_filter_sha256:
+                    return False
 
             aatype = features["aatype"]
             msa = features["msa"]
@@ -616,12 +739,14 @@ def _existing_outputs_are_valid(feature_path: Path, label_path: Path) -> bool:
         return False
 
 
-def _write_preprocess_meta(args: argparse.Namespace, out_dir: Path) -> None:
+def _write_preprocess_meta(args: argparse.Namespace, out_dir: Path, msa_row_filter: MSARowFilter | None) -> None:
     stable_args = {
         k: (str(v) if isinstance(v, Path) else v)
         for k, v in vars(args).items()
-        if k not in {"manifest", "skip_existing"}
+        if k not in {"manifest", "skip_existing", "msa_row_filter"}
     }
+    if msa_row_filter is not None:
+        stable_args["msa_row_filter_sha256"] = msa_row_filter.sha256
     meta = {
         "schema_version": 2,
         "cli_args": stable_args,
@@ -642,6 +767,49 @@ def _write_preprocess_meta(args: argparse.Namespace, out_dir: Path) -> None:
     out_path.write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n")
 
 
+def _write_msa_row_filter_audit(
+    out_dir: Path,
+    *,
+    manifest: Path,
+    msa_row_filter: MSARowFilter,
+    per_chain_stats: List[Dict[str, object]],
+) -> None:
+    total_input = sum(int(cast(int | str, row["input_rows"])) for row in per_chain_stats)
+    total_removed = sum(int(cast(int | str, row["removed_rows"])) for row in per_chain_stats)
+    payload = {
+        "schema_version": 1,
+        "manifest": str(manifest),
+        "chain_count": len(per_chain_stats),
+        "msa_row_filter_sha256": msa_row_filter.sha256,
+        "msa_row_filter_path": str(msa_row_filter.path),
+        "excluded_sequence_count": len(msa_row_filter.excluded_sequence_sha256),
+        "total_msa_rows_before_filter": total_input,
+        "total_msa_rows_removed": total_removed,
+        "total_msa_rows_after_filter": total_input - total_removed,
+        "per_chain": per_chain_stats,
+    }
+    (out_dir / "msa_row_filter_audit.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def _read_existing_msa_row_filter_audit_row(feature_path: Path, chain_id: str) -> Dict[str, object] | None:
+    try:
+        with np.load(feature_path) as features:
+            required = {"msa", "msa_rows_before_filter", "msa_rows_removed_by_filter"}
+            if not required.issubset(set(features.files)):
+                return None
+            input_rows = int(features["msa_rows_before_filter"].item())
+            removed_rows = int(features["msa_rows_removed_by_filter"].item())
+            output_rows = int(features["msa"].shape[0])
+    except Exception:
+        return None
+    return {
+        "chain_id": chain_id,
+        "input_rows": input_rows,
+        "removed_rows": removed_rows,
+        "output_rows": output_rows,
+    }
+
+
 def main() -> None:
     args = parse_args()
 
@@ -652,14 +820,16 @@ def main() -> None:
     processed_labels_dir = Path(args.processed_labels_dir)
     processed_features_dir.mkdir(parents=True, exist_ok=True)
     processed_labels_dir.mkdir(parents=True, exist_ok=True)
+    msa_row_filter = _load_msa_row_filter(args.msa_row_filter)
 
-    _write_preprocess_meta(args, processed_features_dir)
+    _write_preprocess_meta(args, processed_features_dir, msa_row_filter)
 
     manifest = Path(args.manifest)
     chain_ids = [ln.strip() for ln in manifest.read_text().splitlines() if ln.strip() and not ln.startswith("#")]
 
     n_ok = 0
     n_fail = 0
+    msa_filter_audit_rows: List[Dict[str, object]] = []
 
     for cid in tqdm(chain_ids, desc="preprocess"):
         try:
@@ -669,9 +839,17 @@ def main() -> None:
             label_path = chain_npz_path(processed_labels_dir, cid)
             err_marker = chain_error_path(processed_features_dir, cid)
 
-            if args.skip_existing and _existing_outputs_are_valid(feature_path, label_path):
+            if args.skip_existing and _existing_outputs_are_valid(
+                feature_path,
+                label_path,
+                expected_msa_row_filter_sha256=msa_row_filter.sha256 if msa_row_filter is not None else None,
+            ):
                 if err_marker.exists():
                     err_marker.unlink()
+                if msa_row_filter is not None:
+                    audit_row = _read_existing_msa_row_filter_audit_row(feature_path, cid)
+                    if audit_row is not None:
+                        msa_filter_audit_rows.append(audit_row)
                 n_ok += 1
                 continue
 
@@ -689,11 +867,12 @@ def main() -> None:
             if not mmcif_path.exists():
                 raise FileNotFoundError(f"Missing mmCIF: {mmcif_path}")
 
-            msa, deletions, query_sequence = _read_merged_msa(
+            msa, deletions, query_sequence, msa_filter_stats = _read_merged_msa(
                 chain_dir,
                 msa_name=args.msa_name,
                 msa_names=args.msa_names,
                 max_msa_seqs=args.max_msa_seqs,
+                msa_row_filter=msa_row_filter,
             )
             chain_struct = extract_chain_atoms(
                 mmcif_path=mmcif_path,
@@ -758,6 +937,22 @@ def main() -> None:
                     int(projection_stats["projection_valid_ca_count"]), dtype=np.int32
                 ),
             }
+            if msa_row_filter is not None:
+                features_out.update(
+                    {
+                        "msa_row_filter_sha256": np.asarray(msa_row_filter.sha256),
+                        "msa_rows_before_filter": np.asarray(msa_filter_stats.input_rows, dtype=np.int32),
+                        "msa_rows_removed_by_filter": np.asarray(msa_filter_stats.removed_rows, dtype=np.int32),
+                    }
+                )
+                msa_filter_audit_rows.append(
+                    {
+                        "chain_id": cid,
+                        "input_rows": int(msa_filter_stats.input_rows),
+                        "removed_rows": int(msa_filter_stats.removed_rows),
+                        "output_rows": int(msa.shape[0]),
+                    }
+                )
             labels_out = {
                 "chain_id": np.asarray(cid),
                 "ca_coords": target_ca_coords.astype(np.float32),
@@ -802,6 +997,13 @@ def main() -> None:
             continue
 
     print(f"Preprocess complete: ok={n_ok}, fail={n_fail}")
+    if msa_row_filter is not None:
+        _write_msa_row_filter_audit(
+            processed_features_dir,
+            manifest=manifest,
+            msa_row_filter=msa_row_filter,
+            per_chain_stats=msa_filter_audit_rows,
+        )
     if n_fail > 0:
         print("Inspect *.error.txt files in", processed_features_dir)
         if not args.allow_failures:

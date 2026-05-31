@@ -14,13 +14,13 @@ official tensors into minAlphaFold2 features, derives AlphaFold2-style
 supervision, trains with `minalphafold.losses.AlphaFoldLoss`, and returns
 `pred_atom14 = output["atom14_coords"]`.
 
-The limited-track parameter cap is `100,000,000` trainable parameters. This
-full-profile run has about `94.2M` trainable parameters and keeps the standard
-limited-track budget: `10,000` optimizer steps, effective batch size `2`,
+The limited track does not cap trainable parameters. This full-profile run has
+about `94.2M` trainable parameters and keeps the standard
+limited-track budget: `30,000` optimizer steps, effective batch size `8`,
 crop size `256`, and MSA depth `192`.
 
 The train/fine-tune handoff scales AlphaFold2's initial/fine-tune sample ratio
-into the official budget. Fine-tuning starts at step `8696`, leaving `1304`
+into the official budget. Fine-tuning starts at step `26087`, leaving `3913`
 optimizer updates for the fine-tune window. The loss linearly blends from the
 initial loss to the fine-tune loss for the first `1000` fine-tune steps so the
 handoff is smooth instead of a hard objective switch.
@@ -41,10 +41,10 @@ capacity, recycling count, and the smoother fine-tune loss transition.
 
 ## Required run metadata (limited track)
 
-- max_steps: 10000
-- effective_batch_size: 2
-- sample_budget: 20000
-- residue_budget: 5120000
+- max_steps: 30000
+- effective_batch_size: 8
+- sample_budget: 240000
+- residue_budget: 61440000
 - crop_size: 256
 - seed: 0
 - trainable_parameters: about 94.2M

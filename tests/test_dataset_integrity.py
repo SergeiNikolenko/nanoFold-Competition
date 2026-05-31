@@ -370,3 +370,60 @@ def test_preprocess_meta_hash_ignores_local_paths_and_dependency_versions(tmp_pa
         require_labels=True,
     )
     assert fp_a["preprocess_config_sha256"] == fp_b["preprocess_config_sha256"]
+
+
+def test_preprocess_meta_hash_captures_msa_row_filter_sha256(tmp_path: Path) -> None:
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    manifest = manifests / "train.txt"
+    manifest.write_text("1abc_A\n")
+
+    features_a = tmp_path / "features_a"
+    features_b = tmp_path / "features_b"
+    labels_a = tmp_path / "labels_a"
+    labels_b = tmp_path / "labels_b"
+    for path in (features_a, features_b, labels_a, labels_b):
+        path.mkdir()
+
+    for features, labels in ((features_a, labels_a), (features_b, labels_b)):
+        _write_feature_npz(chain_npz_path(features, "1abc_A"))
+        _write_label_npz(chain_npz_path(labels, "1abc_A"))
+
+    base_meta = {
+        "aligner": {"match_score": 2.0, "mode": "global"},
+        "atom14_num_slots": 14,
+        "ca_atom14_slot": 1,
+        "cli_args": {
+            "disable_templates": True,
+            "max_msa_seqs": 2048,
+            "msa_name": "uniref90_hits.a3m",
+            "msa_row_filter_sha256": "a" * 64,
+            "strict": False,
+        },
+        "schema_version": 2,
+    }
+    changed_meta = {
+        **base_meta,
+        "cli_args": {
+            **base_meta["cli_args"],
+            "msa_row_filter_sha256": "b" * 64,
+        },
+    }
+    (features_a / PREPROCESS_META_FILENAME).write_text(json.dumps(base_meta))
+    (features_b / PREPROCESS_META_FILENAME).write_text(json.dumps(changed_meta))
+
+    fp_a = build_split_fingerprint(
+        processed_features_dir=features_a,
+        processed_labels_dir=labels_a,
+        manifest_paths={"train": manifest},
+        require_no_missing=True,
+        require_labels=True,
+    )
+    fp_b = build_split_fingerprint(
+        processed_features_dir=features_b,
+        processed_labels_dir=labels_b,
+        manifest_paths={"train": manifest},
+        require_no_missing=True,
+        require_labels=True,
+    )
+    assert fp_a["preprocess_config_sha256"] != fp_b["preprocess_config_sha256"]

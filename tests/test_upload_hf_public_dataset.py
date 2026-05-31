@@ -11,9 +11,26 @@ from nanofold.chain_paths import chain_npz_path
 from scripts.upload_hf_public_dataset import _upload_auxiliary_files, generate_rows, render_dataset_card
 
 
-def _write_npz_pair(features_dir: Path, labels_dir: Path, chain_id: str, *, length: int = 4, msa_depth: int = 2) -> None:
+def _write_npz_pair(
+    features_dir: Path,
+    labels_dir: Path,
+    chain_id: str,
+    *,
+    length: int = 4,
+    msa_depth: int = 2,
+    filter_sha256: str = "",
+    rows_before_filter: int = -1,
+    rows_removed_by_filter: int = -1,
+) -> None:
     feature_path = chain_npz_path(features_dir, chain_id)
     label_path = chain_npz_path(labels_dir, chain_id)
+    optional_filter_fields = {}
+    if filter_sha256:
+        optional_filter_fields = {
+            "msa_row_filter_sha256": np.asarray(filter_sha256),
+            "msa_rows_before_filter": np.asarray(rows_before_filter, dtype=np.int32),
+            "msa_rows_removed_by_filter": np.asarray(rows_removed_by_filter, dtype=np.int32),
+        }
     np.savez_compressed(
         feature_path,
         chain_id=np.asarray(chain_id),
@@ -29,6 +46,7 @@ def _write_npz_pair(features_dir: Path, labels_dir: Path, chain_id: str, *, leng
         template_aatype=np.zeros((0, length), dtype=np.int32),
         template_ca_coords=np.zeros((0, length, 3), dtype=np.float32),
         template_ca_mask=np.zeros((0, length), dtype=bool),
+        **optional_filter_fields,
     )
     np.savez_compressed(
         label_path,
@@ -66,11 +84,47 @@ def test_generate_rows_unrolls_npz_fields(tmp_path: Path) -> None:
     assert row["split"] == "train"
     assert row["length"] == 4
     assert row["msa_depth"] == 2
+    assert row["msa_row_filter_sha256"] == ""
+    assert row["msa_rows_before_filter"] == -1
+    assert row["msa_rows_removed_by_filter"] == -1
     assert row["template_count"] == 0
     assert row["msa"].shape == (2, 4)
     assert row["atom14_positions"].shape == (4, 14, 3)
     assert len(row["feature_sha256"]) == 64
     assert len(row["label_sha256"]) == 64
+
+
+def test_generate_rows_includes_msa_row_filter_metadata(tmp_path: Path) -> None:
+    features_dir = tmp_path / "features"
+    labels_dir = tmp_path / "labels"
+    features_dir.mkdir()
+    labels_dir.mkdir()
+    manifest = tmp_path / "train.txt"
+    manifest.write_text("1abc_A\n")
+    filter_sha256 = "f" * 64
+    _write_npz_pair(
+        features_dir,
+        labels_dir,
+        "1abc_A",
+        msa_depth=3,
+        filter_sha256=filter_sha256,
+        rows_before_filter=5,
+        rows_removed_by_filter=2,
+    )
+
+    row = next(
+        generate_rows(
+            manifest_path=str(manifest),
+            split="train",
+            processed_features_dir=str(features_dir),
+            processed_labels_dir=str(labels_dir),
+        )
+    )
+
+    assert row["msa_depth"] == 3
+    assert row["msa_row_filter_sha256"] == filter_sha256
+    assert row["msa_rows_before_filter"] == 5
+    assert row["msa_rows_removed_by_filter"] == 2
 
 
 def test_render_dataset_card_documents_columns_and_sampling() -> None:
@@ -85,12 +139,20 @@ def test_render_dataset_card_documents_columns_and_sampling() -> None:
                 "feature_files_sha256": "c" * 64,
                 "label_files_sha256": "d" * 64,
             },
+            "msa_row_filter_source_lock": {
+                "filter_sha256": "e" * 64,
+                "sha256": "f" * 64,
+                "excluded_sequence_count": 12,
+                "cumulative_msa_rows_removed": 34,
+            },
         }
     )
 
     assert "OpenProteinSet" in card
     assert "structural stratification" in card
     assert "`msa`" in card
+    assert "`msa_row_filter_sha256`" in card
+    assert "MSA Row Filtering" in card
     assert "`atom14_positions`" in card
     assert "smaller protein-folding models" in card
 
@@ -134,6 +196,7 @@ def test_upload_auxiliary_files_includes_eval_yaml(tmp_path: Path) -> None:
         "all_manifest": tmp_path / "all.txt",
         "fingerprint": tmp_path / "fingerprint.json",
         "manifest_lock": tmp_path / "manifest.lock.json",
+        "msa_row_filter_source_lock": tmp_path / "msa_filter.lock.json",
     }
     for path in paths.values():
         path.write_text("ok\n")
@@ -151,4 +214,5 @@ def test_upload_auxiliary_files_includes_eval_yaml(tmp_path: Path) -> None:
         "manifests/all.txt",
         "metadata/official_dataset_fingerprint.json",
         "metadata/official_manifest_source.lock.json",
+        "metadata/msa_row_filter_source_lock_public_safe.json",
     ]

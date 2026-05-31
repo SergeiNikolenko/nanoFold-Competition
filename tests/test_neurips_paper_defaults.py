@@ -8,6 +8,7 @@ import yaml
 from neurips_paper.submission_common.minalphafold2_experiment import (
     _fape_clamp_weight,
     _n_cycles_for_batch,
+    _recycle_plan,
 )
 from submissions.minalphafold2 import submission as base_submission
 
@@ -20,13 +21,9 @@ def test_paper_recycle_default_samples_train_but_uses_max_for_eval() -> None:
     cfg = {"seed": 3, "model": {"n_cycles": 4}}
     features = _features()
 
-    sampled = {
-        _n_cycles_for_batch({**cfg, "_runtime": {"step": step}}, features, training=True)
-        for step in range(32)
-    }
-
-    assert sampled <= {1, 2, 3, 4}
-    assert len(sampled) > 1
+    assert _recycle_plan(cfg, training=True) == (4, True)
+    assert _n_cycles_for_batch(cfg, features, training=True) == 4
+    assert _recycle_plan(cfg, training=False) == (4, False)
     assert _n_cycles_for_batch(cfg, features, training=False) == 4
 
 
@@ -36,6 +33,7 @@ def test_paper_recycle_fixed_mode_is_explicit_train_ablation() -> None:
         "experiment": {"recycle": {"train_mode": "fixed"}},
     }
 
+    assert _recycle_plan(cfg, training=True) == (4, False)
     assert _n_cycles_for_batch(cfg, _features(), training=True) == 4
     assert _n_cycles_for_batch(cfg, _features(), training=False) == 4
 

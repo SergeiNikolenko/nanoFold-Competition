@@ -17,6 +17,7 @@ Options:
                               Output dir for label .npz files (default: data/processed_labels)
   --msa-name <filename>       MSA filename to download/use (default: uniref90_hits.a3m)
   --msa-names <csv>           Comma-separated MSA filenames to download/use
+  --msa-row-filter <path>     Optional JSON of held-out-homolog MSA row hashes to remove during preprocessing
   --template-hhr-name <name>  Template hits filename (default: pdb70_hits.hhr; ignored unless templates enabled)
   --enable-templates          Enable template-hit download and template preprocessing
   --mmcif-mode <mode>         mmCIF acquisition: subset, full, or existing (default: subset)
@@ -45,6 +46,7 @@ PROCESSED_FEATURES_DIR="data/processed_features"
 PROCESSED_LABELS_DIR="data/processed_labels"
 MSA_NAME="uniref90_hits.a3m"
 MSA_NAMES=""
+MSA_ROW_FILTER=""
 TEMPLATE_HHR_NAME="pdb70_hits.hhr"
 DOWNLOAD_RETRIES=2
 DOWNLOAD_RETRY_DELAY_SECONDS=2.0
@@ -80,6 +82,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --msa-names)
       MSA_NAMES="$2"
+      shift 2
+      ;;
+    --msa-row-filter)
+      MSA_ROW_FILTER="$2"
       shift 2
       ;;
     --template-hhr-name)
@@ -319,6 +325,9 @@ else
   )
   if [[ -n "$MSA_NAMES" ]]; then
     PREPROCESS_COMMON+=(--msa-names "$MSA_NAMES")
+  fi
+  if [[ -n "$MSA_ROW_FILTER" ]]; then
+    PREPROCESS_COMMON+=(--msa-row-filter "$MSA_ROW_FILTER")
   fi
   if [[ "$USE_TEMPLATES" -eq 1 ]]; then
     PREPROCESS_COMMON+=(--template-hhr-name "$TEMPLATE_HHR_NAME")

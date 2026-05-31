@@ -88,7 +88,7 @@ def test_read_merged_msa_deduplicates_multiple_sources(tmp_path: Path) -> None:
         ">unique2\n-CD\n"
     )
 
-    msa, deletions, query_sequence = read_merged_msa(
+    msa, deletions, query_sequence, filter_stats = read_merged_msa(
         chain_dir,
         msa_name="uniref90_hits.a3m",
         msa_names="uniref90_hits.a3m,mgnify_hits.a3m",
@@ -98,6 +98,49 @@ def test_read_merged_msa_deduplicates_multiple_sources(tmp_path: Path) -> None:
     assert query_sequence == "ACD"
     assert msa.shape == (3, 3)
     assert deletions.shape == (3, 3)
+    assert filter_stats.input_rows == 6
+    assert filter_stats.removed_rows == 0
+
+
+def test_read_merged_msa_filters_non_query_rows_before_depth_cap(tmp_path: Path) -> None:
+    module = _load_preprocess_module()
+    read_merged_msa = getattr(module, "_read_merged_msa")
+    row_filter_cls = getattr(module, "MSARowFilter")
+    sequence_sha256 = getattr(module, "_sequence_sha256")
+
+    chain_dir = tmp_path / "1abc_A"
+    a3m_dir = chain_dir / "a3m"
+    a3m_dir.mkdir(parents=True)
+    (a3m_dir / "uniref90_hits.a3m").write_text(
+        ">query\nACD\n"
+        ">forbidden\nAAA\n"
+        ">allowed\nAC-\n"
+    )
+    filter_path = tmp_path / "filter.json"
+    filter_path.write_text("{}\n")
+    row_filter = row_filter_cls(
+        path=filter_path,
+        sha256="0" * 64,
+        excluded_sequence_sha256=frozenset({sequence_sha256("AAA"), sequence_sha256("ACD")}),
+    )
+
+    msa, deletions, query_sequence, filter_stats = read_merged_msa(
+        chain_dir,
+        msa_name="uniref90_hits.a3m",
+        msa_names="",
+        max_msa_seqs=2,
+        msa_row_filter=row_filter,
+    )
+
+    assert query_sequence == "ACD"
+    assert msa.shape == (2, 3)
+    assert deletions.shape == (2, 3)
+    assert filter_stats.input_rows == 3
+    assert filter_stats.removed_rows == 1
+    # Query row is preserved even though its sequence hash is in the filter.
+    assert np.array_equal(msa[0], np.array([0, 4, 3], dtype=np.int32))
+    # The forbidden row was removed before depth capping, so the next valid row backfills it.
+    assert np.array_equal(msa[1], np.array([0, 4, 21], dtype=np.int32))
 
 
 def test_project_atom14_to_query_reports_alignment_provenance() -> None:
