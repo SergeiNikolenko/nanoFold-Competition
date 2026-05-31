@@ -10,8 +10,10 @@ Single maintainer end-to-end flow for official data refresh:
   1) build required structure metadata for split stratification
   2) regenerate official train/val/hidden_val/all manifests from locked inputs
   3) sync official manifest hashes/counts across track + lock + docs
-  4) download OpenFold assets and preprocess public split NPZs (features + labels)
-  5) rebuild official dataset fingerprint
+  4) download OpenFold assets for public + hidden splits
+  5) build a heldout-target MSA row filter for the manifest trio
+  6) preprocess public + hidden split NPZs (features + labels) with that filter
+  7) rebuild official dataset fingerprint
 
 Options:
   --track-id <id>                     Track id metadata for fingerprint (default: limited)
@@ -53,7 +55,11 @@ Options:
   --private-manifest-lock <path>      Hidden manifest source lock path
                                       (default: <private-root>/leaderboard/private_hidden_manifest_source.lock.json)
   --msa-names <csv>                   Comma-separated MSA filenames to download/preprocess
-  --msa-row-filter <path>             Optional JSON of held-out-homolog MSA row hashes for public/hidden preprocessing
+  --msa-row-filter <path>             Existing JSON of held-out-homolog MSA row hashes for public/hidden preprocessing
+  --msa-row-filter-out <path>         Output path when auto-building the held-out MSA row filter
+                                      (default: <private-root>/msa_row_filters/official_heldout_target_homology_filter.json)
+  --skip-msa-row-filter-build         Do not auto-build an MSA row filter when --msa-row-filter is omitted.
+                                      This is for exploratory/debug runs only, not official trio refreshes.
   --rewrite-lock                      Rewrite lock metadata after manifest regeneration
   --skip-manifest-regen               Skip manifest regeneration step
   --skip-setup                        Skip download+preprocess step
@@ -103,12 +109,15 @@ DOWNLOAD_WORKERS=32
 MMCIF_MODE="subset"
 MSA_NAMES=""
 MSA_ROW_FILTER=""
+MSA_ROW_FILTER_OUT=""
+USER_MSA_ROW_FILTER=0
 USE_TEMPLATES=0
 REWRITE_LOCK=0
 SKIP_MANIFEST_REGEN=0
 SKIP_SETUP=0
 SKIP_FINGERPRINT=0
 SKIP_HIDDEN=0
+SKIP_MSA_ROW_FILTER_BUILD=0
 RESUME_PREPROCESS=0
 DRY_RUN=0
 ORIGINAL_ARGS=("$@")
@@ -245,7 +254,16 @@ while [[ $# -gt 0 ]]; do
       ;;
     --msa-row-filter)
       MSA_ROW_FILTER="$2"
+      USER_MSA_ROW_FILTER=1
       shift 2
+      ;;
+    --msa-row-filter-out)
+      MSA_ROW_FILTER_OUT="$2"
+      shift 2
+      ;;
+    --skip-msa-row-filter-build)
+      SKIP_MSA_ROW_FILTER_BUILD=1
+      shift 1
       ;;
     --enable-templates)
       USE_TEMPLATES=1
@@ -299,6 +317,12 @@ if [[ -z "$HIDDEN_LOCK_FILE" ]]; then
 fi
 if [[ -z "$PRIVATE_MANIFEST_LOCK" ]]; then
   PRIVATE_MANIFEST_LOCK="$PRIVATE_ROOT/leaderboard/private_hidden_manifest_source.lock.json"
+fi
+if [[ -z "$MSA_ROW_FILTER_OUT" ]]; then
+  MSA_ROW_FILTER_OUT="$PRIVATE_ROOT/msa_row_filters/official_heldout_target_homology_filter.json"
+fi
+if [[ "$SKIP_SETUP" -eq 0 && "$SKIP_MSA_ROW_FILTER_BUILD" -eq 0 && "$USER_MSA_ROW_FILTER" -eq 0 ]]; then
+  MSA_ROW_FILTER="$MSA_ROW_FILTER_OUT"
 fi
 
 run_cmd() {
@@ -457,7 +481,7 @@ else
   fi
 fi
 
-echo "[3/5] Download + preprocess public split NPZ data"
+echo "[3/5] Download public split raw assets"
 if [[ "$SKIP_SETUP" -eq 0 ]]; then
   SETUP_CMD=(
     bash "$SCRIPT_DIR/setup_official_data.sh"
@@ -469,20 +493,15 @@ if [[ "$SKIP_SETUP" -eq 0 ]]; then
     --download-retries "$DOWNLOAD_RETRIES"
     --download-retry-delay-seconds "$DOWNLOAD_RETRY_DELAY_SECONDS"
     --download-workers "$DOWNLOAD_WORKERS"
+    --skip-preprocess
   )
   if [[ -n "$MSA_NAMES" ]]; then
     SETUP_CMD+=(--msa-names "$MSA_NAMES")
-  fi
-  if [[ -n "$MSA_ROW_FILTER" ]]; then
-    SETUP_CMD+=(--msa-row-filter "$MSA_ROW_FILTER")
   fi
   if [[ "$USE_TEMPLATES" -eq 0 ]]; then
     SETUP_CMD+=(--disable-templates)
   else
     SETUP_CMD+=(--enable-templates)
-  fi
-  if [[ "$RESUME_PREPROCESS" -eq 1 ]]; then
-    SETUP_CMD+=(--resume-preprocess)
   fi
   if [[ "$DRY_RUN" -eq 1 ]]; then
     SETUP_CMD+=(--dry-run)
@@ -497,7 +516,7 @@ else
   echo "Skipping setup_official_data.sh (--skip-setup)."
 fi
 
-echo "[3b/5] Download + preprocess hidden split NPZ data"
+echo "[3b/5] Download hidden split raw assets"
 if [[ "$SKIP_HIDDEN" -eq 0 && "$SKIP_SETUP" -eq 0 ]]; then
   HIDDEN_MANIFEST="$HIDDEN_MANIFESTS_DIR/hidden_val.txt"
   HIDDEN_PREPARE_CMD=(
@@ -525,14 +544,86 @@ if [[ "$SKIP_HIDDEN" -eq 0 && "$SKIP_SETUP" -eq 0 ]]; then
     HIDDEN_PREPARE_CMD+=(--dry-run)
   fi
   run_cmd "${HIDDEN_PREPARE_CMD[@]}"
+else
+  echo "Skipping hidden split raw asset download (--skip-hidden or --skip-setup)."
+fi
 
+echo "[3c/5] Build held-out-target MSA row filter"
+if [[ "$SKIP_SETUP" -eq 0 && "$USER_MSA_ROW_FILTER" -eq 0 && "$SKIP_MSA_ROW_FILTER_BUILD" -eq 0 ]]; then
+  MSA_FILTER_CMD=(
+    python "$SCRIPT_DIR/build_msa_row_filter.py"
+    --source-manifest "$MANIFESTS_DIR/train.txt"
+    --source-manifest "$MANIFESTS_DIR/val.txt"
+    --heldout-manifest "$MANIFESTS_DIR/val.txt"
+    --chain-data-cache "$CHAIN_DATA_CACHE"
+    --raw-root "$DATA_ROOT"
+    --threads "$DOWNLOAD_WORKERS"
+    --output "$MSA_ROW_FILTER"
+  )
+  if [[ "$SKIP_HIDDEN" -eq 0 ]]; then
+    MSA_FILTER_CMD+=(
+      --source-manifest "$HIDDEN_MANIFESTS_DIR/hidden_val.txt"
+      --heldout-manifest "$HIDDEN_MANIFESTS_DIR/hidden_val.txt"
+    )
+  fi
+  if [[ -n "$MSA_NAMES" ]]; then
+    MSA_FILTER_CMD+=(--msa-names "$MSA_NAMES")
+  fi
+  run_cmd "${MSA_FILTER_CMD[@]}"
+elif [[ -n "$MSA_ROW_FILTER" ]]; then
+  echo "Using existing MSA row filter: $MSA_ROW_FILTER"
+else
+  echo "MSA row-filter build skipped and no --msa-row-filter was supplied; outputs will not be held-out sanitized."
+fi
+
+echo "[3d/5] Preprocess public split NPZ data"
+if [[ "$SKIP_SETUP" -eq 0 ]]; then
+  PUBLIC_PREPROCESS_COMMON=(
+    python "$SCRIPT_DIR/preprocess.py"
+    --raw-root "$DATA_ROOT"
+    --mmcif-root "$DATA_ROOT/pdb_data/mmcif_files"
+    --processed-features-dir "$PROCESSED_FEATURES_DIR"
+    --processed-labels-dir "$PROCESSED_LABELS_DIR"
+  )
+  if [[ -n "$MSA_NAMES" ]]; then
+    PUBLIC_PREPROCESS_COMMON+=(--msa-names "$MSA_NAMES")
+  fi
+  if [[ -n "$MSA_ROW_FILTER" ]]; then
+    PUBLIC_PREPROCESS_COMMON+=(--msa-row-filter "$MSA_ROW_FILTER")
+  fi
+  if [[ "$USE_TEMPLATES" -eq 1 ]]; then
+    PUBLIC_PREPROCESS_COMMON+=(--template-hhr-name "pdb70_hits.hhr")
+  else
+    PUBLIC_PREPROCESS_COMMON+=(--disable-templates)
+  fi
+  if [[ "$RESUME_PREPROCESS" -eq 1 ]]; then
+    PUBLIC_PREPROCESS_COMMON+=(--skip-existing)
+  fi
+  if ! run_cmd "${PUBLIC_PREPROCESS_COMMON[@]}" --manifest "$MANIFESTS_DIR/train.txt"; then
+    if update_processability_exclusions_from_errors "$PROCESSED_FEATURES_DIR"; then
+      restart_after_processability_update
+    fi
+    exit 1
+  fi
+  if ! run_cmd "${PUBLIC_PREPROCESS_COMMON[@]}" --manifest "$MANIFESTS_DIR/val.txt"; then
+    if update_processability_exclusions_from_errors "$PROCESSED_FEATURES_DIR"; then
+      restart_after_processability_update
+    fi
+    exit 1
+  fi
+else
+  echo "Skipping public split preprocessing (--skip-setup)."
+fi
+
+echo "[3e/5] Preprocess hidden split NPZ data"
+if [[ "$SKIP_HIDDEN" -eq 0 && "$SKIP_SETUP" -eq 0 ]]; then
   HIDDEN_PREPROCESS_CMD=(
     python "$SCRIPT_DIR/preprocess.py"
     --raw-root "$DATA_ROOT"
     --mmcif-root "$DATA_ROOT/pdb_data/mmcif_files"
     --processed-features-dir "$HIDDEN_FEATURES_DIR"
     --processed-labels-dir "$HIDDEN_LABELS_DIR"
-    --manifest "$HIDDEN_MANIFEST"
+    --manifest "$HIDDEN_MANIFESTS_DIR/hidden_val.txt"
   )
   if [[ -n "$MSA_NAMES" ]]; then
     HIDDEN_PREPROCESS_CMD+=(--msa-names "$MSA_NAMES")
@@ -555,10 +646,10 @@ if [[ "$SKIP_HIDDEN" -eq 0 && "$SKIP_SETUP" -eq 0 ]]; then
     exit 1
   fi
 else
-  echo "Skipping hidden split data build (--skip-hidden or --skip-setup)."
+  echo "Skipping hidden split preprocessing (--skip-hidden or --skip-setup)."
 fi
 
-echo "[3c/5] Sync processed NPZ data to official manifests"
+echo "[3f/5] Sync processed NPZ data to official manifests"
 if [[ "$SKIP_SETUP" -eq 0 ]]; then
   SYNC_PUBLIC_CMD=(
     python "$SCRIPT_DIR/sync_processed_npz_files.py"
@@ -583,7 +674,7 @@ else
   echo "Skipping processed NPZ sync (--skip-setup)."
 fi
 
-echo "[3d/5] Build raw source lock"
+echo "[3g/5] Build raw source lock"
 SOURCE_LOCK_CMD=(
   python "$SCRIPT_DIR/build_data_source_lock.py"
   --data-root "$DATA_ROOT"
@@ -699,6 +790,9 @@ echo "Manifests: $MANIFESTS_DIR"
 echo "Processed features: $PROCESSED_FEATURES_DIR"
 echo "Processed labels: $PROCESSED_LABELS_DIR"
 echo "Fingerprint: $FINGERPRINT_OUT"
+if [[ -n "$MSA_ROW_FILTER" ]]; then
+  echo "MSA row filter: $MSA_ROW_FILTER"
+fi
 echo "Structure metadata: $STRUCTURE_METADATA"
 echo "Metadata sources: $METADATA_SOURCES_DIR"
 echo "Data source lock: $DATA_SOURCE_LOCK"

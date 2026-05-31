@@ -387,7 +387,7 @@ def render_dataset_card(summary: Mapping[str, Any]) -> str:
         msa_filter_section = f"""
 ## MSA Row Filtering
 
-This release applies held-out-target MSA row filtering to remove non-query MSA rows homologous to public-validation and sealed hidden-validation targets before publishing the public train/validation features. Query rows are preserved. Per-row metadata for the recorded feature-filtering pass is exposed as `msa_row_filter_sha256`, `msa_rows_before_filter`, and `msa_rows_removed_by_filter`; the public-safe source lock records the aggregate multi-pass filtering summary.
+This release applies held-out-target MSA row filtering to remove non-query MSA rows homologous to public-validation and sealed hidden-validation targets before publishing the public train/validation features. The split-aligned filter threshold is 30% sequence identity with 80% coverage; query rows are preserved. Per-row metadata for the recorded feature-filtering pass is exposed as `msa_row_filter_sha256`, `msa_rows_before_filter`, and `msa_rows_removed_by_filter`; the public-safe source lock records the aggregate multi-pass filtering summary.
 
 - MSA row filter SHA256: `{msa_filter.get("filter_sha256", "")}`
 - public-safe source lock SHA256: `{msa_filter.get("sha256", "")}`
@@ -468,7 +468,7 @@ Shape notation:
 ```python
 from datasets import load_dataset
 
-ds = load_dataset("YOUR_ORG/nanofold-public")
+ds = load_dataset("ChrisHayduk/nanofold-public")
 train = ds["train"]
 example = train[0]
 
@@ -496,12 +496,12 @@ The public manifest SHA256 hashes are:
 - train manifest: `{summary["train_manifest_sha256"]}`
 - validation manifest: `{summary["validation_manifest_sha256"]}`
 
-The processed public tensor fingerprints are:
+The processed public tensor fingerprints for the Hugging Face release are:
 
-- feature files fingerprint: `{feature_files_sha256}`
+- feature files fingerprint, after the recorded public MSA row filtering: `{feature_files_sha256}`
 - label files fingerprint: `{label_files_sha256}`
 
-The dataset repository also includes the public NanoFold manifest/fingerprint metadata files used to audit this release.
+This feature fingerprint is intentionally specific to the sanitized Hugging Face public feature tensors and can differ from the default local official feature-root fingerprint. The dataset repository also includes the public NanoFold manifest/fingerprint metadata files used to audit this release.
 
 ## Intended Use
 

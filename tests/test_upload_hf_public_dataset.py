@@ -153,7 +153,10 @@ def test_render_dataset_card_documents_columns_and_sampling() -> None:
     assert "`msa`" in card
     assert "`msa_row_filter_sha256`" in card
     assert "MSA Row Filtering" in card
+    assert "30% sequence identity with 80% coverage" in card
     assert "`atom14_positions`" in card
+    assert 'load_dataset("ChrisHayduk/nanofold-public")' in card
+    assert "sanitized Hugging Face public feature tensors" in card
     assert "smaller protein-folding models" in card
 
 

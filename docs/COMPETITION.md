@@ -171,13 +171,19 @@ This command verifies the committed public manifest hashes, downloads the requir
 
 The setup script expects `aws`, `unzip`, and `python` on `PATH`; it keeps hidden validation assets out of the public setup path.
 
-Maintainer/research refreshes that need held-out-homolog MSA sanitization can
-build a SHA256-only filter with `scripts/build_msa_row_filter.py` and pass it as
+Maintainer full refreshes sanitize MSAs by default. Once a
+train/public-val/hidden-val trio exists, `scripts/full_official_data_refresh.sh`
+builds a private SHA256-only held-out-target filter from train, public
+validation, and hidden validation source MSAs against the public and hidden
+validation target sets, then preprocesses public and hidden features with that
+filter. The filter removes non-query MSA rows before the depth cap while
+preserving each chain's query row, so train MSAs cannot contain homolog rows for
+held-out validation targets. Filters built against hidden validation targets are
+private artifacts and must not be published.
+
+Ad hoc maintainer/research refreshes can still pass an explicit
 `--msa-row-filter <json>` to `scripts/setup_official_data.sh` or
-`scripts/full_official_data_refresh.sh`. The filter removes non-query MSA rows
-before the depth cap while preserving each chain's query row. Filters built
-against hidden validation targets are private artifacts and must not be
-published.
+`scripts/full_official_data_refresh.sh`.
 
 Use `scripts/audit_msa_split.py` to audit public or private split MSA state. It
 reports MSA availability/depth balance, binned MSA-depth JS divergence, target
@@ -231,7 +237,7 @@ Maintainer-only outputs live under the ignored `.nanofold_private/` workspace:
 - `.nanofold_private/leaderboard/private_hidden_manifest_source.lock.json`
 - `.nanofold_private/leaderboard/official_data_source.lock.json`
 
-Full public-data rebuilds use `bash scripts/full_official_data_refresh.sh --rewrite-lock` and are reserved for deliberate changes to the official public data contract.
+Full public-data rebuilds use `bash scripts/full_official_data_refresh.sh --rewrite-lock` and are reserved for deliberate changes to the official public data contract. The default path builds `.nanofold_private/msa_row_filters/official_heldout_target_homology_filter.json` and applies it during public/hidden preprocessing; `--skip-msa-row-filter-build` is only for exploratory/debug runs.
 
 ## 6) Fingerprint and Integrity Requirements
 
@@ -249,10 +255,11 @@ Fingerprint includes:
 Maintainer-only sanitized feature roots produced by
 `scripts/filter_processed_msa_features.py` also write `preprocess_meta.json`
 with `msa_row_filter_sha256`, so their fingerprints differ from the original
-processed features. Official public releases should prefer raw preprocessing
-with `scripts/preprocess.py --msa-row-filter` when all raw alignments are
-available. Post-filter MMseqs residuals should be folded back into the filter
-with `scripts/extend_msa_row_filter_from_audit.py` and re-audited to zero hits.
+processed features. Official public releases should prefer the raw-refresh path
+in `scripts/full_official_data_refresh.sh`, which builds the held-out filter
+before preprocessing so filtering happens before depth capping. Post-filter
+MMseqs residuals should be folded back into the filter with
+`scripts/extend_msa_row_filter_from_audit.py` and re-audited to zero hits.
 When sanitized features are audited for release or rebuttal, use
 `scripts/write_msa_row_filter_source_lock.py` to produce a compact public-safe
 source-lock summary with the row-filter hash, thresholds, normalized MMseqs

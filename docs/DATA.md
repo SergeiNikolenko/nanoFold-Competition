@@ -132,12 +132,20 @@ That script does five things:
 4. Downloads the manifest mmCIF subset from RCSB when `--mmcif-mode subset` is used.
 5. Runs `scripts/preprocess.py` separately for train and public validation manifests.
 
-Maintainer/research refreshes can pass `--msa-row-filter <json>` to
-`scripts/setup_official_data.sh` or `scripts/full_official_data_refresh.sh`.
-The filter JSON is built with `scripts/build_msa_row_filter.py` from held-out
-target sequences and source MSA rows. It stores only SHA256 hashes of ungapped
-MSA-row sequences to remove. Hidden-validation filters are private artifacts and
-must not be published if they were built using hidden target sequences.
+Maintainer full refreshes sanitize MSAs by default. After the
+train/public-validation/hidden-validation manifests are known,
+`scripts/full_official_data_refresh.sh` downloads raw public and hidden
+OpenProteinSet assets, builds a private held-out-target MSA row filter with
+`scripts/build_msa_row_filter.py`, and preprocesses public plus hidden feature
+NPZs with that filter. The generated filter scans source MSAs from train, public
+validation, and hidden validation, then removes non-query rows homologous to
+public or hidden validation targets before the MSA depth cap. Hidden-validation
+filters are private artifacts and must not be published.
+
+Ad hoc maintainer/research refreshes can still pass an explicit
+`--msa-row-filter <json>` to `scripts/setup_official_data.sh` or
+`scripts/full_official_data_refresh.sh`. The filter JSON stores only SHA256
+hashes of ungapped MSA-row sequences to remove.
 When auditing existing processed features instead of raw A3Ms,
 `--source-processed-features-dir` can be repeated so public and private hidden
 feature roots are scanned together.
@@ -535,8 +543,12 @@ For each chain ID, preprocessing:
 
 The MSA row filter is meant to sanitize evolutionary input features against
 held-out target homologs. The recommended split-aligned threshold is `30%`
-sequence identity with `80%` coverage. Filtering runs before `--max-msa-seqs`,
-so deeper non-filtered rows can backfill rows removed near the top of an MSA.
+sequence identity with `80%` coverage. Official trio refreshes build this filter
+from train + public validation + hidden validation source MSAs against the
+public and hidden validation target sets, then apply it to public and hidden
+preprocessing so train MSAs do not carry held-out validation homolog rows.
+Filtering runs before `--max-msa-seqs`, so deeper non-filtered rows can backfill
+rows removed near the top of an MSA.
 When enabled, preprocessing writes `msa_row_filter_sha256`,
 `msa_rows_before_filter`, and `msa_rows_removed_by_filter` into each feature NPZ
 and writes `msa_row_filter_audit.json` into the feature directory. The filter

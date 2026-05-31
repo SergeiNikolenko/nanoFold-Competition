@@ -84,3 +84,5 @@ tests/test_verify_rebuttal_run_artifacts.py
 tests/test_write_msa_row_filter_source_lock.py
 tests/test_rebuttal_cross_architecture_adapters.py
 third_party/minAlphaFold2
+tests/test_ops_generalization_manifest.py
+tests/test_ops_generalization_comparison.py

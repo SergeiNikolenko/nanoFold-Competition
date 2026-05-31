@@ -163,11 +163,20 @@ Preprocessing run metadata is captured in `<processed_features_dir>/preprocess_m
 
 Official scoring requires atom14 labels, and submissions must return `pred_atom14` shaped `(B, L, 14, 3)`. The runtime derives the Cα view from atom14 slot 1 for diagnostics.
 
-Maintainer/research preprocessing can pass `--msa-row-filter` with a JSON filter
-from `scripts/build_msa_row_filter.py`. This removes non-query MSA rows
-homologous to held-out target sequences before the MSA depth cap is applied,
-preserves each chain's query row, and records the filter hash in both feature
-NPZs and preprocessing metadata.
+Official maintainer refreshes must sanitize evolutionary inputs after the
+train/public-val/hidden-val trio is known. `scripts/full_official_data_refresh.sh`
+downloads raw public and hidden OpenProteinSet assets, builds a private
+SHA256-only held-out-target MSA row filter from train + public validation +
+hidden validation source MSAs against the public and hidden validation target
+sets, and passes that filter to public and hidden preprocessing. This removes
+non-query MSA rows homologous to held-out target sequences before the MSA depth
+cap is applied, preserves each chain's query row, and records the filter hash in
+both feature NPZs and preprocessing metadata.
+
+Ad hoc maintainer/research preprocessing can still pass an explicit
+`--msa-row-filter` JSON from `scripts/build_msa_row_filter.py`. Filters built
+against hidden validation targets are private artifacts and must not be
+published.
 
 Maintainers can audit MSA availability, MSA-depth balance, exact processed-row
 overlap, optional MMseqs homology, and raw A3M hit-identifier overlap with
@@ -238,7 +247,20 @@ This requires MMseqs2 on `PATH`, the locked OpenProteinSet chain cache, and `dat
 
 If private hidden preprocessing finds unprocessable structures, record them only in `.nanofold_private/manifests/hidden_processability_exclusions.txt`, rerun `scripts/build_hidden_manifest.py`, and rerun `scripts/verify_hidden_manifest.py`.
 
-After the hidden manifest is written, build the hidden NPZs and pin their fingerprint:
+For a full official data-contract refresh, prefer the single end-to-end command
+below; it regenerates the public manifests, hidden manifest, held-out MSA row
+filter, sanitized public/hidden NPZs, and fingerprints together:
+
+```bash
+bash scripts/full_official_data_refresh.sh --rewrite-lock
+```
+
+For manual hidden-asset maintenance against an already-fixed public split, build
+or reuse the same held-out MSA row filter before preprocessing hidden features.
+The filter must be built from the train, public validation, and hidden
+validation source MSAs against the public and hidden validation target sets, so
+train MSAs cannot carry held-out validation homolog rows. Then build the hidden
+NPZs and pin their fingerprint:
 
 ```bash
 python scripts/prepare_data.py \
@@ -255,6 +277,7 @@ python scripts/preprocess.py \
   --processed-features-dir .nanofold_private/hidden_processed_features \
   --processed-labels-dir .nanofold_private/hidden_processed_labels \
   --manifest .nanofold_private/manifests/hidden_val.txt \
+  --msa-row-filter .nanofold_private/msa_row_filters/official_heldout_target_homology_filter.json \
   --disable-templates
 
 python scripts/build_fingerprint.py \
@@ -294,7 +317,7 @@ Maintainer-only outputs land under `.nanofold_private/`:
 
 The metadata builder also writes `data/manifests/structure_candidates.txt` as an ignored local audit artifact. Commit only public manifests, the public dataset fingerprint, and sanitized public lock metadata.
 
-Full public-data rebuilds are maintainer operations for changing the official public data contract:
+Full public-data rebuilds are maintainer operations for changing the official public data contract. By default the refresh builds `.nanofold_private/msa_row_filters/official_heldout_target_homology_filter.json` and preprocesses public + hidden features with it; do not use `--skip-msa-row-filter-build` for an official trio refresh.
 
 ```bash
 bash scripts/full_official_data_refresh.sh --rewrite-lock
