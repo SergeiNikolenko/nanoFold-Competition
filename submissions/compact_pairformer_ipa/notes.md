@@ -63,6 +63,11 @@ The committed source was exercised on an A100 with the official crop size and MS
 2.60 GiB peak allocated CUDA memory and 2.96 GiB peak reserved memory. All gradient tensors were
 finite, and the step completed in 1.82 seconds after model construction.
 
+The official effective batch is implemented as `batch_size=4` with two gradient-accumulation
+microbatches. A full-shape `B=4` microbatch completed in 4.62 seconds at 0.865 samples/second and
+used 11.02 GiB peak allocated / 12.42 GiB peak reserved CUDA memory. `B=8` was only 3.7% faster in
+throughput while reserving 24.74 GiB, so the submitted configuration keeps the lower-memory option.
+
 An official-mode four-step synthetic smoke run wrote checkpoints at steps 0, 2, and 4. Resuming
 from step 2 reproduced the step-3 and step-4 losses exactly. Label-free multi-checkpoint prediction
 and the separate FoldScore process both completed. The synthetic score is intentionally not reported

@@ -12,7 +12,7 @@ data:
   val_manifest: data/manifests/val.txt
   crop_size: 256
   msa_depth: 192
-  batch_size: 1
+  batch_size: 4
   num_workers: 2
   train_crop_mode: random
   val_crop_mode: center
@@ -75,7 +75,7 @@ train:
   log_every: 10
   eval_every: 1000
   save_every: 1000
-  grad_accum_steps: 8
+  grad_accum_steps: 2
   finetune_start_step: 1000
   finetune_ramp_steps: 4000
   finetune_lr_scale: 1.0
