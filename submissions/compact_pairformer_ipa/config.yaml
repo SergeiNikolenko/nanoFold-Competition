@@ -82,4 +82,4 @@ train:
   warmup_steps: 334
   lr_decay_step: 16696
   amp: false
-  eval_foldscore_components: true
+  eval_foldscore_components: false
