@@ -170,6 +170,9 @@ def test_groupwise_scheduler_preserves_muon_to_adam_lr_ratio() -> None:
     assert [group["lr"] for group in optimizer.param_groups] == pytest.approx([0.005, 0.0005])
     scheduler.step()
     assert [group["lr"] for group in optimizer.param_groups] == pytest.approx([0.01, 0.001])
+    for _ in range(6):
+        scheduler.step()
+    assert [group["lr"] for group in optimizer.param_groups] == pytest.approx([0.005, 0.0005])
 
 
 def test_optimizer_and_scheduler_checkpoint_round_trip(tmp_path: Path) -> None:

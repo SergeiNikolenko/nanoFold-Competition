@@ -28,9 +28,9 @@ into the benchmark.
 
 The hidden rank metric is area under the fixed-sample learning curve. The loss therefore blends from
 the initial AlphaFold objective into the geometry-aware fine-tuning objective between steps 1,000 and
-5,000, while the learning-rate schedule remains independent of that handoff. This makes backbone,
-side-chain, and stereochemical supervision active for the high-weight middle checkpoint rather than
-only near the end of the run.
+5,000. The learning rate drops by half when that ramp completes. This makes backbone, side-chain,
+and stereochemical supervision active for the high-weight middle checkpoint, then uses lower-rate
+updates to refine geometry for the remainder of the run.
 
 ## Competition Compliance Checklist
 
@@ -93,6 +93,14 @@ Muon at 0.01 was selected because its step-50 improvement over Muon at 0.02 was 
 (0.2623 versus 0.1319), SphereGrinder (0.1524 versus 0.0412), and DipDiff (0.4498 versus 0.3555),
 while its clash and backbone-geometry components did not regress. Adam produced a higher step-50
 lDDT but a lower complete FoldScore and substantially larger loss and gradient-norm excursions.
+
+A second deterministic pilot used 1,024 training chains and 128 validation chains. Its schedule was
+scaled by training-set epochs: pilot steps 100 and 500 correspond to official steps 1,000 and 5,000.
+Two same-host runs were tensor-identical through step 500 (877 model tensors, maximum absolute
+difference 0). The common step-500 checkpoint scored 0.323871. Over the next 100 updates, keeping
+Muon at 0.01 reached 0.338234, while dropping it to 0.005 reached **0.343251**. The cooldown improved
+GDT_HA, atom14 lDDT, CADaa, backbone geometry, and DipDiff; only SphereGrinder and clash preservation
+declined slightly. The submitted schedule therefore applies the measured 0.5 decay at step 5,000.
 
 ## How to run
 

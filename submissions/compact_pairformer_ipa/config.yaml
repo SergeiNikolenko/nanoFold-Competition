@@ -68,7 +68,7 @@ optim:
   aux_weight_decay: 0.0
   weight_decay: 0.0
   grad_clip_norm: 0.1
-  lr_decay_factor: 0.95
+  lr_decay_factor: 0.5
 
 train:
   max_steps: 30000
@@ -80,6 +80,6 @@ train:
   finetune_ramp_steps: 4000
   finetune_lr_scale: 1.0
   warmup_steps: 334
-  lr_decay_step: 16696
+  lr_decay_step: 5000
   amp: false
   eval_foldscore_components: false
