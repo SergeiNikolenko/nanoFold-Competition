@@ -52,9 +52,21 @@ only near the end of the run.
 - MSA depth: 192
 - seed: 0
 - trainable_parameters: 6024402
-- hardware: pending official run
-- wall_clock_time: pending official run
-- commit: pending submission commit
+- hardware: NVIDIA A100-PCIE-40GB 40 GB (CUDA 12.8, PyTorch 2.7.1; full-shape smoke)
+- wall_clock_time: 11 seconds for four full-shape smoke train steps; full 30000-step run pending
+- commit: 656775bc0d4519962aac290e0f518050b90db665
+
+## Validation Evidence
+
+The committed source was exercised on an A100 with the official crop size and MSA depth
+(`B=1, L=256, N=192`). A BF16 forward, backward, gradient clip, and Muon/Adam optimizer step used
+2.60 GiB peak allocated CUDA memory and 2.96 GiB peak reserved memory. All gradient tensors were
+finite, and the step completed in 1.82 seconds after model construction.
+
+An official-mode four-step synthetic smoke run wrote checkpoints at steps 0, 2, and 4. Resuming
+from step 2 reproduced the step-3 and step-4 losses exactly. Label-free multi-checkpoint prediction
+and the separate FoldScore process both completed. The synthetic score is intentionally not reported
+as a benchmark result; the full public-data learning curve and sealed hidden score remain pending.
 
 ## How to run
 
