@@ -78,6 +78,22 @@ validation loss, lDDT, and RMSD diagnostics every 5,000 steps while retaining ch
 1,000 steps for the required learning-curve points. The separate sealed prediction/scoring stages
 compute the complete ranking metric without duplicating that work during optimization.
 
+A deterministic optimizer pilot used 128 official training chains and 32 official validation chains
+with the same effective batch size, crop size, MSA depth, model, and geometry-loss ramp shape as the
+submitted run. The table reports the complete FoldScore computed in a separate label-aware scoring
+process; it is a small public-data pilot, not a hidden-set or leaderboard result.
+
+| Optimizer | FoldScore at step 20 | FoldScore at step 50 |
+| --- | ---: | ---: |
+| Muon, learning rate 0.02 | 0.208203 | 0.225949 |
+| Muon, learning rate 0.01 | **0.211507** | **0.266542** |
+| Adam, learning rate 0.001 | 0.195205 | 0.222400 |
+
+Muon at 0.01 was selected because its step-50 improvement over Muon at 0.02 was supported by CADaa
+(0.2623 versus 0.1319), SphereGrinder (0.1524 versus 0.0412), and DipDiff (0.4498 versus 0.3555),
+while its clash and backbone-geometry components did not regress. Adam produced a higher step-50
+lDDT but a lower complete FoldScore and substantially larger loss and gradient-norm excursions.
+
 ## How to run
 
 ```bash
