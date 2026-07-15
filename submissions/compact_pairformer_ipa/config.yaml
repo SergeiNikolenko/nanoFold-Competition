@@ -73,7 +73,7 @@ optim:
 train:
   max_steps: 30000
   log_every: 10
-  eval_every: 1000
+  eval_every: 5000
   save_every: 1000
   grad_accum_steps: 2
   finetune_start_step: 1000

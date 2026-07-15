@@ -73,10 +73,10 @@ from step 2 reproduced the step-3 and step-4 losses exactly. Label-free multi-ch
 and the separate FoldScore process both completed. The synthetic score is intentionally not reported
 as a benchmark result; the full public-data learning curve and sealed hidden score remain pending.
 
-The training loop keeps the expensive FoldScore component evaluation disabled. It still records the
-standard validation loss, lDDT, and RMSD diagnostics at checkpoint intervals; the separate sealed
-prediction/scoring stages compute the complete ranking metric without duplicating that work during
-optimization.
+The training loop keeps the expensive FoldScore component evaluation disabled. It records standard
+validation loss, lDDT, and RMSD diagnostics every 5,000 steps while retaining checkpoints every
+1,000 steps for the required learning-curve points. The separate sealed prediction/scoring stages
+compute the complete ranking metric without duplicating that work during optimization.
 
 ## How to run
 
