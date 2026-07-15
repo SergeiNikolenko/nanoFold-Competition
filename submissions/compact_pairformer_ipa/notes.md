@@ -54,7 +54,7 @@ updates to refine geometry for the remainder of the run.
 - trainable_parameters: 6024402
 - hardware: NVIDIA A100-PCIE-40GB 40 GB (CUDA 12.8, PyTorch 2.7.1; full-shape smoke)
 - wall_clock_time: 11 seconds for four full-shape smoke train steps; full 30000-step run pending
-- commit: 656775bc0d4519962aac290e0f518050b90db665
+- commit: f7aab255f3af417e5498fb925588e869fd6b3628 (validated model/config)
 
 ## Validation Evidence
 
@@ -100,7 +100,10 @@ Two same-host runs were tensor-identical through step 500 (877 model tensors, ma
 difference 0). The common step-500 checkpoint scored 0.323871. Over the next 100 updates, keeping
 Muon at 0.01 reached 0.338234, while dropping it to 0.005 reached **0.343251**. The cooldown improved
 GDT_HA, atom14 lDDT, CADaa, backbone geometry, and DipDiff; only SphereGrinder and clash preservation
-declined slightly. The submitted schedule therefore applies the measured 0.5 decay at step 5,000.
+declined slightly. A paired chain-level bootstrap placed the aggregate FoldScore difference at 0.0050
+with a 95% confidence interval of -0.0012 to 0.0115, so this is optimizer-selection evidence rather
+than a guarantee of hidden-set improvement. DipDiff and backbone geometry had positive confidence
+intervals. The submitted schedule therefore applies the measured 0.5 decay at step 5,000.
 
 ## How to run
 
