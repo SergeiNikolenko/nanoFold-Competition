@@ -78,6 +78,16 @@ validation loss, lDDT, and RMSD diagnostics every 5,000 steps while retaining ch
 1,000 steps for the required learning-curve points. The separate sealed prediction/scoring stages
 compute the complete ranking metric without duplicating that work during optimization.
 
+## Throughput profile
+
+The training loader can use `data.bucket_by_length: true` with `data.length_bucket_size: 16`. It
+keeps the fixed-seed shuffle but groups nearby chain lengths before forming each batch, reducing
+padding in the pairwise trunk. On the Kolmogorov RTX 4090 pilot with the official B=4, L<=256,
+MSA=192 shape and deterministic CUDA settings, eight one-microbatch updates took 11.79 seconds
+with ordinary shuffled batches and 7.92 seconds with length buckets (33% faster). The model and
+official data contract were unchanged. Checkpoint RNG-state preservation is disabled explicitly for
+this zero-dropout configuration; the generic model default remains enabled.
+
 A deterministic optimizer pilot used 128 official training chains and 32 official validation chains
 with the same effective batch size, crop size, MSA depth, model, and geometry-loss ramp shape as the
 submitted run. The table reports the complete FoldScore computed in a separate label-aware scoring

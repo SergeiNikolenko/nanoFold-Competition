@@ -212,6 +212,8 @@ class CompactPairformerIPA(torch.nn.Module):
         from minalphafold.embedders import InputEmbedder
 
         self.config = config
+        self.activation_checkpointing = bool(model_cfg.get("activation_checkpointing", True))
+        self.checkpoint_preserve_rng_state = bool(model_cfg.get("checkpoint_preserve_rng_state", True))
         self.input_embedder = InputEmbedder(config)
         self.msa_blocks = torch.nn.ModuleList([Evoformer(config) for _ in range(config.num_evoformer)])
         self.single_rep_proj = torch.nn.Linear(config.c_m, config.c_s)
@@ -271,7 +273,7 @@ class CompactPairformerIPA(torch.nn.Module):
 
         msa_representation, pair_representation = self.input_embedder(target_feat, residue_index, msa_feat)
         for block in self.msa_blocks:
-            if self.training and torch.is_grad_enabled():
+            if self.activation_checkpointing and self.training and torch.is_grad_enabled():
                 msa_representation, pair_representation = cast(
                     tuple[torch.Tensor, torch.Tensor],
                     torch_checkpoint.checkpoint(
@@ -281,6 +283,7 @@ class CompactPairformerIPA(torch.nn.Module):
                         msa_mask,
                         pair_mask,
                         use_reentrant=False,
+                        preserve_rng_state=self.checkpoint_preserve_rng_state,
                     ),
                 )
             else:
@@ -293,7 +296,7 @@ class CompactPairformerIPA(torch.nn.Module):
 
         single_representation = self.single_rep_proj(msa_representation[:, 0])
         for block in self.pairformer_blocks:
-            if self.training and torch.is_grad_enabled():
+            if self.activation_checkpointing and self.training and torch.is_grad_enabled():
                 single_representation, pair_representation = cast(
                     tuple[torch.Tensor, torch.Tensor],
                     torch_checkpoint.checkpoint(
@@ -303,6 +306,7 @@ class CompactPairformerIPA(torch.nn.Module):
                         seq_mask,
                         pair_mask,
                         use_reentrant=False,
+                        preserve_rng_state=self.checkpoint_preserve_rng_state,
                     ),
                 )
             else:

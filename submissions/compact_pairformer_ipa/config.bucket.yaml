@@ -1,4 +1,4 @@
-run_name: compact_pairformer_ipa_muon_limited
+run_name: compact_pairformer_ipa_muon_bucket_limited
 track: limited
 seed: 0
 
